@@ -65,6 +65,9 @@ CMyPracticeView::CMyPracticeView() noexcept
 
 CMyPracticeView::~CMyPracticeView()
 {
+	g_viewer->setDone(true);
+	Sleep(1000);
+	g_viewer->stopThreading();
 }
 
 BOOL CMyPracticeView::PreCreateWindow(CREATESTRUCT& cs)
@@ -202,31 +205,16 @@ void CMyPracticeView::OnInitialUpdate()
 	//root->addChild(geode.get());
 
 	//test_2: Delaunay Triangulation
-	/*
-	osg::ref_ptr<osg::Geode> geode1 = new osg::Geode;
-	osg::ref_ptr<DelauneyTriangulation> delaunayTriangulation1 = new DelauneyTriangulation;
-	delaunayTriangulation1->addPoints(*DelauneyTriangulation::getRandomExampleVertexSets_1().get());
-	delaunayTriangulation1->delauneyTriangulation_OSG();
-	osg::ref_ptr<osg::Geometry> geometry1 = delaunayTriangulation1->createGeometry();
-	geode1->addDrawable(geometry1.get());*/
+	osg::ref_ptr<osg::Geode> geode6 = new osg::Geode;
+	osg::ref_ptr<DelauneyTriangulation> delaunayTriangulation6 = new DelauneyTriangulation;
+	//delaunayTriangulation6->getRegularTeatExmapleData(1000000, 0.5);
+	//delaunayTriangulation6->getExmapleVertexSetsFromFile("D:\\demo.dat");
+	//delaunayTriangulation6->delauneyTriangulation_OSG();
+	//delaunayTriangulation6->delauneyTriangulation_OGRECDT();
+	//osg::ref_ptr<osg::Geometry> geometry6 = delaunayTriangulation6->createGeometry();
+	//geode6->addDrawable(geometry6.get());
 
-	osg::ref_ptr<osg::Geode> geode2 = new osg::Geode;
-	osg::ref_ptr<DelauneyTriangulation> delaunayTriangulation2 = new DelauneyTriangulation;
-	delaunayTriangulation2->addPoints(*DelauneyTriangulation::getRandomExampleVertexSets_2().get());
-	delaunayTriangulation2->delauneyTriangulation_OSG();
-	osg::ref_ptr<osg::Geometry> geometry2 = delaunayTriangulation2->createGeometry();
-	geode2->addDrawable(geometry2.get());
-
-	osg::ref_ptr<osg::Geode> geode3 = new osg::Geode;
-	osg::ref_ptr<DelauneyTriangulation> delaunayTriangulation3 = new DelauneyTriangulation;
-	delaunayTriangulation3->addPoints(*DelauneyTriangulation::getRandomExampleVertexSets_3().get());
-	delaunayTriangulation3->delauneyTriangulation_CGAL();
-	osg::ref_ptr<osg::Geometry> geometry3 = delaunayTriangulation3->createGeometry();
-	geode3->addDrawable(geometry3.get());
-
-	//root->addChild(geode1.get());
-	root->addChild(geode2.get());
-	root->addChild(geode3.get());
+	root->addChild(geode6.get());
 
 	g_viewer->setSceneData(root.get());
 

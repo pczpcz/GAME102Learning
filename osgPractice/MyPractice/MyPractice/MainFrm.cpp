@@ -56,6 +56,11 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 
 	BOOL bNameValid;
 
+	k.Create(IDD_DIALOG1, this);
+	k.ShowWindow(SW_SHOW);
+
+	/*
+
 	if (!m_wndMenuBar.Create(this))
 	{
 		TRACE0("未能创建菜单栏\n");
@@ -173,7 +178,7 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	lstBasicCommands.AddTail(ID_SORTING_GROUPBYTYPE);
 
 	CMFCToolBar::SetBasicCommands(lstBasicCommands);
-
+	*/
 	return 0;
 }
 
