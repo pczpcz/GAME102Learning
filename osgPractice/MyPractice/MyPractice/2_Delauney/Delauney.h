@@ -22,6 +22,7 @@ public:
 	void delauneyTriangulation_OSG();
 	void delauneyTriangulation_OGRECDT();
 	void delauneyTriangulation_CGAL();
+	void delauneyTriangulation_Triangle();
 
 	void delaunayConstrainTriangulation_OSG();
 	void delauneyConstrainTriangulation_OGRECDT();
