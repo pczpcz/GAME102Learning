@@ -1,10 +1,12 @@
 #pragma once
 
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
-#include <CGAL/Triangulation_2.h>
-#include <CGAL/TDS_2/Triangulation_data_structure_2.h>
-#include <CGAL/Triangulation_vertex_base_2.h>
-#include <CGAL/Triangulation_face_base_2.h>
+#include <CGAL/Projection_traits_xy_3.h>
+#include <CGAL/HalfedgeDS_default.h>
+
+#include <osg/Geometry>
+
+#include <limits>
 
 //目的：
 //1. 练习使用CGAL
@@ -38,141 +40,308 @@
 //融合子集结果（这个应该有人做过，后面找找文献）
 //2. devide and conquer感觉好像天然有局部性优势，而且在内存的使用率上面和并发的编程难度上面好像都比较占优势
 
+//数据结构的选型
+//1. 排除了Triangulation_data_structure_2
+//CGAL的Triangulation_data_structure_2是针对三角化的特殊数据结构，每次插入一个点，会把所有点连成三角形，所以需要找到插入面或线的位置
+//而分治算法是把一些破碎的片段逐渐连接起来，允许过程中，存在一些孤立的点、线、面
+//所以这个数据结构感觉很难适配，不过它的实现方法可以借鉴，本来想  定义局部的_tds，用逐点插入+分治结合，结果还是不行
+//尴尬了！！！
+//2. 还是考虑使用成熟的库，通用的数据结构，BGL有几个，如半边数据结构，
+//3. 最简单的邻接表应该不行，因为简单的CCW，CW操作都很麻烦
+//结论：用halfedge试试吧，CGAL有一个数据结构：HalfedgeDS
+//参考1：https://doc.cgal.org/latest/HalfedgeDS/index.html#Chapter_Halfedge_Data_Structures
+//参考2：https://doc.cgal.org/latest/BGL/group__PkgBGLTraits.html
 
-//TODO: devide_and_conqure的边界条件整理
+//surface_mesh
 
 
 
+//TODO: devide_and_conqure的边界条件整理(退化情况)
+//1. 三点共线
+//2. 四点共圆
+//3. 考虑多线程版本： 如果两个子集是上下排列，此时没有上下切线
 
 //TODO: devide_and_conqure算法现有的开源项目
 
-
-
-
 //以上都是目前不成熟的理解，后面慢慢深入修正，主要目的还是想先把CGAL用起来
 //TODO: 相关参考资料汇总
-// [0]
+// [0]https://www.doc88.com/p-694154354521.html?r=1
 // [1]
 // [2]
 // 
 //author: zhanghcuanpan
 //date: 2023.01.14
 
-using namespace CGAL;
+template <typename T>
+class MyTrait
+{
+    typedef T Point_2;
+};
 
-template < class Gt, class Tds = Triangulation_data_structure_2 <Triangulation_vertex_base_2<Gt>,Triangulation_face_base_2<Gt> > >
-    class Delaunay_devide_and_conqure : public Triangulation_2
+template <>
+class MyTrait<osg::Vec3Array>
+{
+    typedef osg::Vec3Array::iterator Point_2;
+};
+
+typedef MyTrait<osg::Vec3Array> OSGTrait;
+
+#define INFINITE  std::numeric_limits<unsigned int>::max()
+
+//模板编程搞不定，直接写类了
+template <class traits = OSGTrait>
+class Delaunay_devide_and_conqure
 {
 public:
-    typedef Gt Geom_traits;
-    typedef typename Geom_traits::Point_2                       Point;
-    typedef typename Geom_traits::Segment_2                     Segment;
-    typedef typename Geom_traits::Triangle_2                    Triangle;
-    typedef typename Geom_traits::Orientation_2                 Orientation_2;
-    typedef typename Geom_traits::Compare_x_2                   Compare_x;
-    typedef typename Geom_traits::Compare_y_2                   Compare_y;
-    typedef typename Geom_traits::Side_of_oriented_circle_2     Side_of_oriented_circle;
+    typedef typename traits::Point_2                                         Point;
+    typedef typename CGAL::Exact_predicates_inexact_constructions_kernel     K;
+    typedef typename CGAL::HalfedgeDS_default<traits>                        HDS;
+    typedef typename CGAL::HalfedgeDS_decorator<HDS>                         Decorator;
+    typedef typename HDS::Halfedge                                           Halfedge;
+    typedef typename HDS::Halfedge_handle                                    Halfedge_handle;
+    typedef typename HDS::Vertex                                             Vertex;
+    typedef typename HDS::Vertex_handle                                      Vertex_handle;
+    typedef typename HDS::Face                                               Face;
+    typedef typename HDS::Face_handle                                        Face_handle;
 
-    typedef Triangulation_2<Gt, Tds>                            Triangulation;
-    typedef typename Triangulation::size_type                   size_type;
-    typedef typename Triangulation::Locate_type                 Locate_type;
-    typedef typename Triangulation::Face_handle                 Face_handle;
-    typedef typename Triangulation::Vertex_handle               Vertex_handle;
-    typedef typename Triangulation::Edge                        Edge;
-    typedef typename Triangulation::Edge_circulator             Edge_circulator;
-    typedef typename Triangulation::Face_circulator             Face_circulator;
-    typedef typename Triangulation::Vertex_circulator           Vertex_circulator;
-    typedef typename Triangulation::Finite_edges_iterator       Finite_edges_iterator;
-    typedef typename Triangulation::Finite_faces_iterator       Finite_faces_iterator;
-    typedef typename Triangulation::Finite_vertices_iterator    Finite_vertices_iterator;
-    typedef typename Triangulation::All_faces_iterator          All_faces_iterator;
+    typedef typename CGAL::Projection_traits_xy_3<K>                         Gt;    //先用这个进行计算
 
-    Delaunay_devide_and_conqure(Delaunay_devide_and_conqure&&) = default;
-    Delaunay_devide_and_conqure& operator=(const Delaunay_devide_and_conqure&) = default;
-    Delaunay_devide_and_conqure& operator=(Delaunay_devide_and_conqure&&) = default;
-    ~Delaunay_devide_and_conqure() = default;
+    typedef typename traits::Point_2                             OutContainerIttr;
+    typedef typename std::pair<Vertex_handle, Vertex_handle>     LimitHandlesPair;
+    typedef typename std::pair<Vertex_handle, Vertex_handle>     TangentLine;
+    typedef typename std::pair<TangentLine, TangentLine>         TopAndBottomTangent;
 
-    template <class InputIterator>
-    Delaunay_triangulation_2(InputIterator first, InputIterator last, const Gt& gt = Gt())
-        : Triangulation_2<Gt, Tds>(gt)
+    Delaunay_devide_and_conqure() {}
+
+    Delaunay_devide_and_conqure(OutContainerIttr begin, OutContainerIttr end)
     {
-        //insert(first, last);
+        _pHds = new HDS;
+        _pDecorator = new Decorator(*_pHds);
+
+        unsigned int size = std::distance(begin, end);
+        if (size > 0)
+            insert(begin, end);
+
+        //v, h, f
+        _pHds->reserve(size, size, size);
     }
 
-    /*
-    void insert(iterator begin, iterator end)
+    ~Delaunay_devide_and_conqure()
+    {
+        delete _pDecorator;
+        delete _pHds;
+    }
+
+    class LexiSortOpr
+    {
+        bool operator()(const OutContainerIttr& ittr1, const OutContainerIttr& ittr2)
+        {
+            if (ittr1->x() < ittr2->x()) {
+                return true;
+            }
+            else {
+                if (ittr1->y() < ittr2->y())
+                    return true;
+                return false;
+            }
+        }
+    };
+
+private:
+    std::set<OutContainerIttr, LexiSortOpr> m_setPointsIttrs;  //对数据点进行排序（lexicographically ascending）
+    HDS* _pHds;
+    Decorator* _pDecorator;
+    Gt _gt;
+
+public:
+    void insert(OutContainerIttr begin, OutContainerIttr end)
     {
         //对插入的数据点集进行排序，方便后面的devide_and_conqure
-        //数据点集可以直接插入到osg::Vec3Array, 方便和osg衔接
-        _tds.insert(begin, end);
-        sort(begin, end);
+        for (OutContainerIttr ittr = begin; ittr != end; ++ittr)
+        {
+            //如果能够顺便去重就好了
+            m_setPointsIttrs.insert(ittr);
+        }
     }
-    */
 
-    /* 一些工具：
-    //tool_1: 顶点排序
-    void sort(iterator begin, iterator end);
+    bool is_valid_handle(Vertex_handle vh) { return true; }
+    bool is_valid_handle(Face_handle fh) { return true; }
+    bool is_valid_handle(Halfedge_handle hh) { return true; }
+    bool is_valid_TangentLine(TangentLine line)
+    {
+        if (is_valid_handle(line.first) && is_valid_handle(line.second))
+            return true;
+        return false;
+    }
+
+    bool is_same_tangent(TangentLine line1, TangentLine line2)
+    {
+        if (!is_valid_TangentLine(line1) || !is_valid_TangentLine(line2))
+            return false;
+
+        if (line1.first == line2.first && line1.second == line2.second)
+            return true;
+
+        return false;
+    }
 
     //tool_2: 寻找两个凸包的上下切线
-    std::pair<EdgeHandle, EdgeHandle> findTangent(iterator begin1, iterator end1, iterator begin2, iterator end2);
+    TopAndBottomTangent findTangent(LimitHandlesPair leftHull, LimitHandlesPair rightHull)
+    {
+    }
 
-    //tool_3: ...
+    //插入三角形（当只有一个顶点时，其他两个顶点的句柄无效，但是仍然当三角形插入到数据结构中；一条边时，同理）
+    LimitHandlesPair insert_hds(OutContainerIttr pr1, OutContainerIttr pr2, OutContainerIttr pr3)
+    {
+        std::vector<OutContainerIttr> vecValidIttrs;
+        if (pr1 != OutContainerIttr())
+            vecValidIttrs.push_back(pr1);
+        if (pr2 != OutContainerIttr())
+            vecValidIttrs.push_back(pr2);
+        if (pr3 != OutContainerIttr())
+            vecValidIttrs.push_back(pr3);
+
+        Vertex_handle h1;
+        Vertex_handle h2;
+        Vertex_handle h3;
+        Vertex_handle LeftMostVertexHandle;
+        Vertex_handle RightMostVertexHandle;
+
+        //三点逆时针
+        int size = vecValidIttrs.size();
+        if (size == 3)
+        {
+            Gt::Point_2 p1(vecValidIttrs[0]->x(), vecValidIttrs[0]->y());
+            Gt::Point_2 p2(vecValidIttrs[1]->x(), vecValidIttrs[1]->y());
+            Gt::Point_2 p3(vecValidIttrs[2]->x(), vecValidIttrs[2]->y());
+            CGAL::Orientation orientation = _gt.orientation_2_object(p1, p2, p3);
+            if (orientation == CGAL::CLOCKWISE)
+            {
+                //p1->p3->p2
+                Vertex v1(vecValidIttrs[0]);
+                Vertex v2(vecValidIttrs[2]);
+                Vertex v3(vecValidIttrs[1]);
+                //vh1 = _pDecorator->vertices_push_back(v1);
+                //vh2 = _pDecorator->vertices_push_back(v2);
+                //vh3 = _pDecorator->vertices_push_back(v3);
+
+                Halfedge_handle hf1 = _pHds->edges_push_back(Halfedge());
+                Halfedge_handle hf2 = _pHds->edges_push_back(Halfedge());
+                Halfedge_handle hf3 = _pHds->edges_push_back(Halfedge());
+                //hf1->HBase::set_prev(hf2);
+                //_pDecorator->set_face();
+                //_pDecorator->set_vertex();
+                //_pDecorator->set_prev();
 
 
-    */
+                Face face(edge1);
+                Face_handle fh = _pDecorator->faces_push_back(face);
+
+                LeftMostVertexHandle = (vecValidIttrs[0].x() < vecValidIttrs[1].x()) ? vh1 : vh2;
+                LeftMostVertexHandle = (LeftMostVertexHandle->point()->x() < vecValidIttrs[2].x()) ? LeftMostVertexHandle : vh3;
+
+                RightMostVertexHandle = (vecValidIttrs[0].y() < vecValidIttrs[1].y()) ? vh2 : vh1;
+                RightMostVertexHandle = (RightMostVertexHandle->point()->y() < vecValidIttrs[2].y()) ? vh3 : RightMostVertexHandle;
+            }
+            else
+            {
+                //p1->p2->p3
+                Vertex v1(vecValidIttrs[0]);
+                Vertex v2(vecValidIttrs[1]);
+                Vertex v3(vecValidIttrs[2]);
+                vh1 = _pDecorator->vertices_push_back(v1);
+                vh2 = _pDecorator->vertices_push_back(v2);
+                vh3 = _pDecorator->vertices_push_back(v3);
+
+                Halfedge edge1;
+                Halfedge edge2;
+                Halfedge edge3;
+
+                Face face;
+
+                LeftMostVertexHandle = (vecValidIttrs[0].x() < vecValidIttrs[1].x()) ? vh1 : vh2;
+                LeftMostVertexHandle = (LeftMostVertexHandle->point()->x() < vecValidIttrs[2].x()) ? LeftMostVertexHandle : vh3;
+
+                RightMostVertexHandle = (vecValidIttrs[0].y() < vecValidIttrs[1].y()) ? vh2 : vh1;
+                RightMostVertexHandle = (RightMostVertexHandle->point()->y() < vecValidIttrs[2].y()) ? vh3 : RightMostVertexHandle;
+            }
+        }
+        else if (size == 2) 
+        {
+        
+        }
+        else if (size == 1) 
+        {
+        
+        }
+        else 
+        {
+            return LimitHandlesPair();
+        }
+        return LimitHandlesPair(LeftMostVertexHandle, RightMostVertexHandle);
+    }
 
     //devide_and_conqure
-    /*伪代码
-    void devide_and_conqure(iterator begin, iterator end) 
+    //返回左右两边极限位置的句柄
+    LimitHandlesPair devide_and_conqure(OutContainerIttr begin, OutContainerIttr end)
     {
-        //默认数据点集已经做过排序了
-        int size = std::distance(begin, end);
+        unsigned int size = std::distance(begin, end);
         if (size == 1 || size <= 0)
         {
-            return;
+            OutContainerIttr pr1 = OutContainerIttr();
+            OutContainerIttr pr2 = OutContainerIttr();
+            OutContainerIttr pr3 = OutContainerIttr();
+            return insert_hds(p1, p2, p3);
         }
         else if (size == 2)
         {
-            step1: 操作_tds，将两点连线
-            return;
-        }
-        else if (size == 2)
-        {
-            //操作_tds，将两点连线
-            _tds.colinear(begin, end)
-            return;
+            //step1 : 操作_tds，将两点连线
+            OutContainerIttr pr1 = begin;
+            OutContainerIttr pr2 = begin + 1;
+            OutContainerIttr pr3 = OutContainerIttr();
+            return insert_hds(p1, p2, p3);
         }
         else if (size == 3)
         {
-            //操作_tds，将三点连成三角形
-            _tds.coltriangal(begin, end)
-            return;
+            //操作_tds，将两点连线
+            OutContainerIttr pr1 = begin;
+            OutContainerIttr pr2 = begin + 1;
+            OutContainerIttr pr3 = begin + 2;
+            return insert_hds(p1, p2, p3);
         }
 
         //dv_callback
 
         //conditon: size > 3
         int mid = size/2;
-        iterator begin1 = begin;
-        iterator end1 = begin + mid;
-        iterator begin2 = end1 + 1;
-        iterator end2 = end;
+        OutContainerIttr begin_1 = begin;
+        OutContainerIttr end_1 = begin + mid;
+        OutContainerIttr begin_2 = end1 + 1;
+        OutContainerIttr end_2 = end;
 
-        devide_and_conqure(begin1, end1);
-        devide_and_conqure(begin2, end2);
-        merge(begin1, end1, begin2, end2);
-    }*/
+        LimitHandlesPair limitHandles_L = devide_and_conqure(begin_1, end_1);
+        LimitHandlesPair limitHandles_R = devide_and_conqure(begin_2, end_2);
+        return merge(limitHandles_L, limitHandles_R);
+    }
 
     //merge function for devide_and_conqure
-    /*伪代码
-    void merge(iterator begin1, iterator end1, iterator begin2, iterator end2)
+
+    LimitHandlesPair merge(LimitHandlesPair limitLeft, LimitHandlesPair limitRight)
     {
-        //就不对iterator的有效性做判断了，默认是ok的
-        //step1: 寻找两个凸包的上下切线（凸包可能是1个单独三角形、也可能是单独的一个点，也可能是单独的一条边，也可能是delaunay网格）
+        //step1: 寻找两个凸包的上下切线（凸包可能是1个单独三角形、也可能是单独的一个点，也可能是单独的一条边，也可能是delaunay网格）   
+        TopAndBottomTangent tangents = findTangent(LimitHandlesPair limitLeft, LimitHandlesPair limitRight)
+        bool bLeft = is_valid_TangentLine(tangents.first);
+        bool bRight = is_valid_TangentLine(tangents.first);
+        if (!bLeft || bRight)
+        {
+            if (bLeft) return limitLeft;  
+            if (bRight) return limitRight;
+            return LimitHandlesPair();
+        }
 
         //step2: 开始递进下切线，以满足delaunay三角划分
         //TODO: merge_callback
-        while(下切线 != 上切线)
+        while(!is_same_tangent(tangents.first, tangents.second))
         {
             //step2_1：以下切线的【左】顶点（位于左凸包）为基点，在【右】凸包中，寻找下切线的【候选点】
             //寻找过程中，必要时断开【右】凸包的某些边（这边后面不会再连起来了）
@@ -188,14 +357,14 @@ public:
 
             
         }//step2_4: continue the while circle
+
+        Vertex_handle LeftMostVertexHandle = limitLeft.first;
+        Vertex_handle RightMostVertexHandle = limitRight.second;
+        return LimitHandlesPair(LeftMostVertexHandle, RightMostVertexHandle);
     }
-    */
 
 private:
-    //继承的基类成员：
-    //Gt _gt;
-    //Tds _tds;
-    //Vertex_handle _infinite_vertex;
+
 
 };
 
