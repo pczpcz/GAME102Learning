@@ -51,16 +51,56 @@ struct Face
 
 	Face(const Face& face)
 	{
-		index1 = face.index1;
-		index2 = face.index2;
+		if (face.index1 > face.index2) {
+			index1 = face.index1;
+			index2 = face.index2;
+		} else {
+			index1 = face.index2;
+			index2 = face.index1;
+		}
 		index3 = face.index3;
+
+		unsigned int tmp;
+		if (index3 > index1) {
+			tmp = index1;
+			index1 = index3;
+			index3 = index2;
+			index2 = tmp;
+		} else {
+			if (index3 > index2) {
+				tmp = index3;
+				index3 = index2;
+				index2 = tmp;
+			}
+		}
 	}
 
 	Face(unsigned int index1, unsigned int index2, unsigned int index3)
 	{
-		this->index1 = index1;
-		this->index2 = index2;
+		if (index1 > index2) {
+			this->index1 = index1;
+			this->index2 = index2;
+		}
+		else {
+			this->index1 = index2;
+			this->index2 = index1;
+		}
 		this->index3 = index3;
+
+		unsigned int tmp;
+		if (this->index3 > this->index1) {
+			tmp = this->index1;
+			this->index1 = this->index3;
+			this->index3 = this->index2;
+			this->index2 = tmp;
+		}
+		else {
+			if (this->index3 > this->index2) {
+				tmp = this->index3;
+				this->index3 = this->index2;
+				this->index2 = tmp;
+			}
+		}
 	}
 
 	Face& operator=(const Face& face)
@@ -100,6 +140,7 @@ public:
 	typedef CGAL::Constrained_Delaunay_triangulation_2<K, TDS, Itag>				CDT2D;
 	typedef CDT2D::Finite_face_handles												Face_handles;
 	typedef CDT2D::Face_circulator													Circulator;
+	typedef CDT2D::Vertex_circulator												VCirculator;
 	typedef CDT2D::Face_handle														Face_handle;
 	typedef CDT2D::Vertex_handle													Vertex_handle;
 	typedef CDT2D::Point															Point2D;
@@ -166,6 +207,9 @@ public:
 		double m_dRight;
 		double m_dTop;
 		double m_dBottom;
+
+		//左右极限的顶点
+		Vertex_handle vertex_lr[2];
 
 		typedef osg::Vec3Array::iterator DataIttr;
 		std::vector<DataIttr> m_vecDataIttrs;
@@ -236,6 +280,180 @@ public:
 		{
 		}
 
+		void update_right_most_vertex(Face_handle fh)
+		{
+			Vertex_handle vh;
+			if (fh->vertex(0)->point().x() > fh->vertex(1)->point().x()) {
+				vh = fh->vertex(0);
+			} else {
+				vh = fh->vertex(1);
+			}
+
+			if (vh->point().x() < fh->vertex(2)->point().x()) {
+				vh = fh->vertex(2);
+			}
+
+			if (vertex_lr[1] == Vertex_handle() 
+				|| vertex_lr[1]->point().x() < vh->point().x()) 
+			{
+				vertex_lr[1] = vh;
+			}
+		}
+
+		void update_left_most_vertex(Face_handle fh)
+		{
+			Vertex_handle vh;
+			if (fh->vertex(0)->point().x() < fh->vertex(1)->point().x()) {
+				vh = fh->vertex(0);
+			} else {
+				vh = fh->vertex(1);
+			}
+
+			if (vh->point().x() > fh->vertex(2)->point().x()) {
+				vh = fh->vertex(2);
+			}
+
+			if (vertex_lr[0] == Vertex_handle()
+				|| vertex_lr[0]->point().x() > vh->point().x())
+			{
+				vertex_lr[0] = vh;
+			}
+		}
+
+		bool is_border(SSectionData& section, Vertex_handle vh)
+		{
+			Circulator fcc = section.m_dt.incident_faces(vh);
+			Circulator fcc_end(fcc);
+			do {
+				if (section.m_dt.is_infinite(fcc)){
+					return true;
+				}
+			} while (++fcc != fcc_end);
+			return false;
+		}
+
+		//遍历到上切线，去重后，将顶点加入到三角化中(zig_zag)
+		void get_up_tangent_vetex(SSectionData& leftGraph, SSectionData& rightGraph, std::vector<Vertex_handle>& vecVHandles)
+		{
+			Vertex_handle hvl = leftGraph.vertex_lr[1];
+			Vertex_handle hvr = rightGraph.vertex_lr[0];
+			if (hvl == Vertex_handle() || hvr == Vertex_handle())
+				return;
+
+			std::set<Vertex_handle> VertexIndexsSet;
+			std::deque<Vertex_handle> deque_vertexs_left;
+			std::deque<Vertex_handle> deque_vertexs_right;
+			deque_vertexs_left.push_back(hvl);
+			deque_vertexs_right.push_back(hvr);
+			vecVHandles.push_back(hvl);
+			vecVHandles.push_back(hvr);
+			while (!deque_vertexs_left.empty() || !deque_vertexs_right.empty())
+			{
+				if (!deque_vertexs_left.empty())
+				{
+					hvl = deque_vertexs_left.front();
+					deque_vertexs_left.pop_front();
+					if (leftGraph.m_dt.is_infinite(hvl))
+						continue;
+
+					VCirculator ccl = leftGraph.m_dt.incident_vertices(hvl);
+					VCirculator ccl_end(ccl);
+					do {
+						if (!leftGraph.m_dt.is_infinite(ccl->handle()) && is_border(leftGraph, ccl->handle())) {
+							if (VertexIndexsSet.insert(ccl->handle()).second) {
+								if (CGAL::RIGHT_TURN != CGAL::orientation(hvl->point(), hvr->point(), ccl->handle()->point())) {
+									deque_vertexs_left.push_back(ccl->handle());
+									vecVHandles.push_back(ccl->handle());
+								}
+							}
+						}
+					} while (++ccl != ccl_end);
+				}
+
+				if (!deque_vertexs_right.empty())
+				{
+					hvr = deque_vertexs_right.front();
+					deque_vertexs_right.pop_front();
+					if (rightGraph.m_dt.is_infinite(hvr))
+						continue;
+
+					VCirculator ccr = rightGraph.m_dt.incident_vertices(hvr);
+					VCirculator ccr_end(ccr);
+					do {
+						if (!rightGraph.m_dt.is_infinite(ccr->handle()) && is_border(rightGraph, ccr->handle())) {
+							if (VertexIndexsSet.insert(ccr->handle()).second) {
+								if (CGAL::RIGHT_TURN != CGAL::orientation(hvl->point(), hvr->point(), ccr->handle()->point())) {
+									deque_vertexs_left.push_back(ccr->handle());
+									vecVHandles.push_back(ccr->handle());
+								}
+							}
+						}
+					} while (++ccr != ccr_end);
+				}
+			}
+		}
+
+		//遍历到下切线，去重后，将顶点加入到三角化中(zig_zag)
+		void get_bottom_tangent_vetex(SSectionData& leftGraph, SSectionData& rightGraph, std::vector<Vertex_handle>& vecVHandles)
+		{
+			Vertex_handle hvl = leftGraph.vertex_lr[1];
+			Vertex_handle hvr = rightGraph.vertex_lr[0];
+			if (hvl == Vertex_handle() || hvr == Vertex_handle())
+				return;
+
+			std::set<Vertex_handle> VertexIndexsSet;
+			std::deque<Vertex_handle> deque_vertexs_left;
+			std::deque<Vertex_handle> deque_vertexs_right;
+			deque_vertexs_left.push_back(hvl);
+			deque_vertexs_right.push_back(hvr);
+			vecVHandles.push_back(hvl);
+			vecVHandles.push_back(hvr);
+			while (!deque_vertexs_left.empty() || !deque_vertexs_right.empty())
+			{
+				if (!deque_vertexs_left.empty())
+				{
+					hvl = deque_vertexs_left.front();
+					deque_vertexs_left.pop_front();
+					if (leftGraph.m_dt.is_infinite(hvl))
+						continue;
+
+					VCirculator ccl = leftGraph.m_dt.incident_vertices(hvl);
+					VCirculator ccl_end(ccl);
+					do {
+						if (!leftGraph.m_dt.is_infinite(ccl->handle()) && is_border(leftGraph, ccl->handle())) {
+							if (VertexIndexsSet.insert(ccl->handle()).second) {
+								if (CGAL::LEFT_TURN != CGAL::orientation(hvl->point(), hvr->point(), ccl->handle()->point())) {
+									deque_vertexs_left.push_back(ccl->handle());
+									vecVHandles.push_back(ccl->handle());
+								}
+							}
+						}
+					} while (++ccl != ccl_end);
+				}
+
+				if (!deque_vertexs_right.empty())
+				{
+					hvr = deque_vertexs_right.front();
+					deque_vertexs_right.pop_front();
+					if (rightGraph.m_dt.is_infinite(hvr))
+						continue;
+
+					VCirculator ccr = rightGraph.m_dt.incident_vertices(hvr);
+					VCirculator ccr_end(ccr);
+					do {
+						if (!rightGraph.m_dt.is_infinite(ccr->handle()) && is_border(rightGraph, ccr->handle())) {
+							if (VertexIndexsSet.insert(ccr->handle()).second) {
+								if (CGAL::LEFT_TURN != CGAL::orientation(hvl->point(), hvr->point(), ccr->handle()->point())) {
+									deque_vertexs_left.push_back(ccr->handle());
+									vecVHandles.push_back(ccr->handle());
+								}
+							}
+						}
+					} while (++ccr != ccr_end);
+				}
+			}
+		}
+
 		void boundingBox(double x, double y) 
 		{
 			if (x < m_dLeft)
@@ -249,22 +467,14 @@ public:
 				m_dTop = y;
 		}
 
-		bool check_intersect(Face_handle handle, SSectionData& other)
+		bool check_circle_intersect(Face_handle handle, Segment_2& seg) 
 		{
-			Point2D &p1 = handle->vertex(0)->point();
-			Point2D &p2 = handle->vertex(1)->point();
-			Point2D &p3 = handle->vertex(2)->point();
+			Point2D& p1 = handle->vertex(0)->point();
+			Point2D& p2 = handle->vertex(1)->point();
+			Point2D& p3 = handle->vertex(2)->point();
 			Circle_2 cir(p1, p2, p3);
 
-			Segment_2 seg1(Point2D(other.m_dRight, other.m_dTop), Point2D(other.m_dLeft, other.m_dTop));
-			Segment_2 seg2(Point2D(other.m_dLeft, other.m_dTop), Point2D(other.m_dLeft, other.m_dBottom));
-			Segment_2 seg3(Point2D(other.m_dLeft, other.m_dBottom), Point2D(other.m_dRight, other.m_dBottom));
-			Segment_2 seg4(Point2D(other.m_dRight, other.m_dBottom), Point2D(other.m_dRight, other.m_dTop));
-
-			if (CGAL::do_intersect(cir, seg1)
-				|| CGAL::do_intersect(cir, seg2)
-				|| CGAL::do_intersect(cir, seg3)
-				|| CGAL::do_intersect(cir, seg4)) 
+			if (CGAL::do_intersect(cir, seg))
 			{
 				m_vecRiskHandles.push_back(handle);
 				m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(handle->vertex(0)->info(), handle->vertex(0)));
@@ -272,8 +482,12 @@ public:
 				m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(handle->vertex(2)->info(), handle->vertex(2)));
 				Face face(handle->vertex(0)->info(), handle->vertex(1)->info(), handle->vertex(2)->info());
 				m_facesmap.insert(std::pair<Face, bool>(face, false));
+
 				return true;
 			}
+
+			update_right_most_vertex(handle);
+			update_left_most_vertex(handle);
 
 			m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(handle->vertex(0)->info(), handle->vertex(0)));
 			m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(handle->vertex(1)->info(), handle->vertex(1)));
@@ -283,8 +497,8 @@ public:
 			m_facesmap.insert(std::pair<Face, bool>(face, true));
 			return false;
 		}
-
-		Orientation orientation(SSectionData& other) 
+		
+		Orientation orientation(SSectionData& other)
 		{
 			if (m_iSampleBeginX < 0 || m_iSampleEndX < 0)
 				return Not_Near;
@@ -312,6 +526,24 @@ public:
 		{
 			for (auto& handle : other.m_vecRiskHandles)
 				insert_delaunay(handle);
+		}
+
+		void insert_tangent_delaunay(SSectionData& graph1, SSectionData& graph2) 
+		{
+			std::vector<Vertex_handle> vecVHandles;
+			get_up_tangent_vetex(graph1, graph2, vecVHandles);
+			get_bottom_tangent_vetex(graph1, graph2, vecVHandles);
+		
+			for (auto& vh : vecVHandles)
+			{
+				auto ittr = m_vertexHashtable.find(vh->info());
+				if (ittr == m_vertexHashtable.end())
+				{
+					Vertex_handle h1 = m_dt.insert(vh->point());
+					h1->info() = vh->info();
+					m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(h1->info(), h1));
+				}
+			}
 		}
 
 		bool check_face_intersect(Face_handle& handle, Segment_2 seg)
@@ -553,5 +785,4 @@ protected:
 	void merge(SSectionData* section1, SSectionData* section2);
 	void delaunay_CGAL(SSectionData *sectionData);
 	void sample(float fSampleRatio, int iThreadNum, osg::Vec3Array::iterator begin, osg::Vec3Array::iterator end);
-	//void DoEx(mono::tool::SElevationDomainData * dataset, const std::string & path, bool bValidBoundaryHeight, double dMaxTriangleEdgeLength, bool bNeedElementConvex);
 };

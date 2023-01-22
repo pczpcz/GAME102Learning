@@ -64,7 +64,7 @@ void Delaunay_Mutithread_CGAL::delaunay(osg::Vec3Array::iterator begin, osg::Vec
 	int iThreadNum = getThreadNum(size);
 
 	//测试
-	iThreadNum = 2;
+	iThreadNum = 1;
 
 	unsigned int vertexPerthread = size / iThreadNum;
 	std::thread *pThreads = new std::thread[iThreadNum];
@@ -251,47 +251,38 @@ void Delaunay_Mutithread_CGAL::merge(SSectionData* section1, SSectionData* secti
 	if (!section1 || !section2)
 		return;
 
+	SSectionData deplicateSection(*section1, *section2);
+	Point2D p1((section1->m_dRight + section2->m_dLeft) / 2, deplicateSection.m_dTop);
+	Point2D p2((section1->m_dRight + section2->m_dLeft) / 2, deplicateSection.m_dBottom);
+	Segment_2 seg(p1, p2);
+
 	//1. 对与隔壁分区有相交风险的面进行识别
 	for (auto face_handle : section1->m_dt.finite_face_handles())
 	{
 		//计算这个面的外接圆 和 它的左右两个分区是否有交叉，如果有, 将这个面认为是有风险的面
-		if (!section1->check_intersect(face_handle, *section2)) 
-		{
+		if (!section1->check_circle_intersect(face_handle, seg))
 			saveFaceIndexs(face_handle);
-		}
 	}
 	for (auto face_handle : section2->m_dt.finite_face_handles())
 	{
 		//计算这个面的外接圆 和 它的左右两个分区是否有交叉，如果有, 将这个面认为是有风险的面
-		if (!section2->check_intersect(face_handle, *section1))
-		{
+		if (!section2->check_circle_intersect(face_handle, seg))
 			saveFaceIndexs(face_handle);
-		}
 	}
 
 	//对非安全面重新进行三角化
-	SSectionData deplicateSection(*section1, *section2);
 	deplicateSection.insert_risk_delaunay(*section1);
 	deplicateSection.insert_risk_delaunay(*section2);
+	deplicateSection.insert_tangent_delaunay(*section1, *section2);
 
 	//挑选出安全面，并检查跨边面和重复，为合并做准备
-	Point2D p1(section1->m_dRight, deplicateSection.m_dTop);
-	Point2D p2(section1->m_dRight, deplicateSection.m_dBottom);
-	Point2D p3(section2->m_dLeft, deplicateSection.m_dTop);
-	Point2D p4(section2->m_dLeft, deplicateSection.m_dBottom);
-	Point2D p5((section1->m_dRight + section2->m_dLeft)/2, deplicateSection.m_dTop);
-	Point2D p6((section1->m_dRight + section2->m_dLeft)/2, deplicateSection.m_dBottom);
-	Segment_2 seg1(p1, p2);
-	Segment_2 seg2(p3, p4);
-	Segment_2 seg3(p5, p6);
-
 	for (Face_handle face_handle : deplicateSection.m_dt.finite_face_handles())
 	{
+		//saveFaceIndexs(face_handle);
+
 		//检查是否跨边的面, 与合并前的面重复的面
-		if (section1->check_face_intersect(face_handle, seg1)
-			|| section2->check_face_intersect(face_handle, seg2)
-			|| section1->check_face_intersect(face_handle, seg3)
-			|| section2->check_face_intersect(face_handle, seg3)
+		if (section1->check_face_intersect(face_handle, seg)
+			|| section2->check_face_intersect(face_handle, seg)
 			|| section1->check_face_duplicate(face_handle)
 			|| section2->check_face_duplicate(face_handle))
 		{
