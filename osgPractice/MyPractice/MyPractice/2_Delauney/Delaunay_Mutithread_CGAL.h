@@ -136,8 +136,11 @@ public:
 	typedef CGAL::Triangulation_vertex_base_with_info_2<unsigned int, K, Vb>		Info;
 	typedef CGAL::Triangulation_data_structure_2<Info, Fb>							TDS;
 	typedef CGAL::Exact_predicates_tag												Itag;
-	typedef CGAL::Constrained_Delaunay_triangulation_2<K, TDS, Itag>				CDT2D;
+	//typedef CGAL::Constrained_Delaunay_triangulation_2<K, TDS, Itag>				CDT2D;
+	typedef CGAL::Delaunay_triangulation_2<K, TDS>									CDT2D;
 	typedef CDT2D::Finite_face_handles												Face_handles;
+	typedef CDT2D::Finite_faces_iterator											Face_ittr;
+	typedef CDT2D::Finite_vertices_iterator											Vertex_ittr;
 	typedef CDT2D::Face_circulator													Circulator;
 	typedef CDT2D::Vertex_circulator												VCirculator;
 	typedef CDT2D::Face_handle														Face_handle;
@@ -191,6 +194,7 @@ public:
 
 		enum Status
 		{
+			Status_Idle,
 			Status_Tri,
 			Status_Merging,
 			Status_Finish
@@ -235,7 +239,7 @@ public:
 			m_iSampleBeginX = -1;
 			m_iSampleEndX = -1;
 
-			m_status = Status_Tri;
+			m_status = Status_Idle;
 
 			m_dLeft = MAX_DOUBLE;
 			m_dRight = (-1) * MAX_DOUBLE;
@@ -251,7 +255,7 @@ public:
 			m_iSampleBeginX = data.m_iSampleBeginX;
 			m_iSampleEndX = data.m_iSampleEndX;
 
-			m_status = Status_Tri;
+			m_status = Status_Idle;
 
 			m_dLeft = MAX_DOUBLE;
 			m_dRight = (-1) * MAX_DOUBLE;
@@ -267,7 +271,7 @@ public:
 			m_iSampleBeginX = data1.m_iSampleBeginX;
 			m_iSampleEndX = data2.m_iSampleEndX;
 
-			m_status = Status_Tri;
+			m_status = Status_Idle;
 
 			m_dLeft = MAX_DOUBLE;
 			m_dRight = (-1) * MAX_DOUBLE;
@@ -473,9 +477,9 @@ public:
 
 		bool check_circle_intersect(Face_handle handle, Segment_2& seg, Orientation ori)
 		{
-			Point2D p1 = handle->vertex(0)->point();
-			Point2D p2 = handle->vertex(1)->point();
-			Point2D p3 = handle->vertex(2)->point();
+			Point2D &p1 = handle->vertex(0)->point();
+			Point2D &p2 = handle->vertex(1)->point();
+			Point2D &p3 = handle->vertex(2)->point();
 			Circle_2 cir(p1, p2, p3);
 
 			if (CGAL::do_intersect(cir, seg))

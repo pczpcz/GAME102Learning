@@ -366,6 +366,8 @@ void Delaunay_Mutithread_CGAL::delaunay_CGAL(SSectionData *sectionData)
 		}
 	}
 
+	sectionData->m_status = SSectionData::Status_Tri;
+
 	//检查是否有新的合并任务（添加合并任务到线程池），检查是否完成全部工作（停止线程池）
 	checkMergingAndFinish();
 
@@ -405,7 +407,9 @@ int Delaunay_Mutithread_CGAL::hasMerging(std::set<std::pair<int, int>>& setMergi
 		for (int j = i + 1; j < m_vecSectionData.size(); ++j)
 		{
 			if (m_vecSectionData[i].m_status == SSectionData::Status_Merging
-				|| m_vecSectionData[j].m_status == SSectionData::Status_Merging)
+				|| m_vecSectionData[j].m_status == SSectionData::Status_Merging
+				|| m_vecSectionData[i].m_status < SSectionData::Status_Tri
+				|| m_vecSectionData[j].m_status < SSectionData::Status_Tri)
 			{
 				continue;
 			}
@@ -482,10 +486,12 @@ void Delaunay_Mutithread_CGAL::sample(float fSampleRatio, int iThreadNum, osg::V
 		for (auto ittr = begin; ittr != end; ++ittr)
 		{
 			m_vecSectionData[0].m_iSampleBeginX = 0;
-			m_vecSectionData[0].m_status = SSectionData::Status_Tri;
+			//m_vecSectionData[0].m_status = SSectionData::Status_Idle;
 			m_vecSectionData[0].m_iSampleEndX = 1;	 //暂时只考虑横向的划分
 			m_vecSectionData[0].boundingBox(ittr->x(), ittr->y());
 			m_vecSectionData[0].m_vecDataIttrs.push_back(ittr);
+			m_vecSectionData[0].m_bLeftFinishMerge = true;
+			m_vecSectionData[0].m_bRightFinishMerge = true;
 		}
 		return;
 	}
@@ -499,7 +505,7 @@ void Delaunay_Mutithread_CGAL::sample(float fSampleRatio, int iThreadNum, osg::V
 		m_vecSectionData[i].m_vecDataIttrs.reserve(vertexPerthread + 1);
 		m_vecSectionData[i].m_iSampleBeginX = i;
 		m_vecSectionData[i].m_iSampleEndX = (i + 1);
-		m_vecSectionData[i].m_status = SSectionData::Status_Tri;
+		//m_vecSectionData[i].m_status = SSectionData::Status_Idle;
 	}
 
 	//1. 随机采样确认数据分布(如何防止溢出啊)
