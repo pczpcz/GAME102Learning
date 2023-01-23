@@ -64,7 +64,7 @@ void Delaunay_Mutithread_CGAL::delaunay(osg::Vec3Array::iterator begin, osg::Vec
 	int iThreadNum = getThreadNum(size);
 
 	//测试
-	iThreadNum = 1;
+	iThreadNum = 3;
 
 	unsigned int vertexPerthread = size / iThreadNum;
 	std::thread *pThreads = new std::thread[iThreadNum];
@@ -241,6 +241,16 @@ void Delaunay_Mutithread_CGAL::saveFaceIndexs(Face_handle fh)
 	m_PrimitveSetRef->push_back(fh->vertex(2)->info());
 }
 
+void Delaunay_Mutithread_CGAL::saveFaceIndexs(unsigned int index1, unsigned int index2, unsigned int index3) 
+{
+	std::lock_guard<std::recursive_mutex> lock(m_mutex);
+	if (!m_PrimitveSetRef)
+		m_PrimitveSetRef = new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES);
+	m_PrimitveSetRef->push_back(index1);
+	m_PrimitveSetRef->push_back(index2);
+	m_PrimitveSetRef->push_back(index3);
+}
+
 Delaunay_Mutithread_CGAL::SSectionData::Orientation Delaunay_Mutithread_CGAL::orientation(SSectionData& section1, SSectionData& section2)
 {
 	return section1.orientation(section2);
@@ -260,19 +270,21 @@ void Delaunay_Mutithread_CGAL::merge(SSectionData* section1, SSectionData* secti
 	for (auto face_handle : section1->m_dt.finite_face_handles())
 	{
 		//计算这个面的外接圆 和 它的左右两个分区是否有交叉，如果有, 将这个面认为是有风险的面
-		if (!section1->check_circle_intersect(face_handle, seg))
-			saveFaceIndexs(face_handle);
+		if (!section1->check_circle_intersect(face_handle, seg, SSectionData::Near_Right)) {
+			//saveFaceIndexs(face_handle);
+		}
 	}
 	for (auto face_handle : section2->m_dt.finite_face_handles())
 	{
 		//计算这个面的外接圆 和 它的左右两个分区是否有交叉，如果有, 将这个面认为是有风险的面
-		if (!section2->check_circle_intersect(face_handle, seg))
-			saveFaceIndexs(face_handle);
+		if (!section2->check_circle_intersect(face_handle, seg, SSectionData::Near_Left)) {
+			//saveFaceIndexs(face_handle);
+		}
 	}
 
 	//对非安全面重新进行三角化
-	deplicateSection.insert_risk_delaunay(*section1);
-	deplicateSection.insert_risk_delaunay(*section2);
+	deplicateSection.insert_risk_delaunay(*section1, SSectionData::Near_Right);
+	deplicateSection.insert_risk_delaunay(*section2, SSectionData::Near_Left);
 	deplicateSection.insert_tangent_delaunay(*section1, *section2);
 
 	//挑选出安全面，并检查跨边面和重复，为合并做准备
@@ -304,6 +316,30 @@ void Delaunay_Mutithread_CGAL::merge(SSectionData* section1, SSectionData* secti
 
 	section1->m_bRightFinishMerge = true;
 	section2->m_bLeftFinishMerge = true;
+	section1->m_status = SSectionData::Status_Finish;
+	section2->m_status = SSectionData::Status_Finish;
+
+	if (section1->m_bLeftFinishMerge && section1->m_bRightFinishMerge) 
+	{
+		for (auto face_handle : section1->m_dt.finite_face_handles()) {
+			auto ittr_left = section1->m_setRiskHandles_left.find(face_handle);
+			auto ittr_right = section1->m_setRiskHandles_right.find(face_handle);
+			if (ittr_left == section1->m_setRiskHandles_left.end() && ittr_right == section1->m_setRiskHandles_right.end()) {
+				saveFaceIndexs(face_handle);
+			}
+		}
+	}
+
+	if (section2->m_bLeftFinishMerge && section2->m_bRightFinishMerge)
+	{
+		for (auto face_handle : section2->m_dt.finite_face_handles()) {
+			auto ittr_left = section2->m_setRiskHandles_left.find(face_handle);
+			auto ittr_right = section2->m_setRiskHandles_right.find(face_handle);
+			if (ittr_left == section2->m_setRiskHandles_left.end() && ittr_right == section2->m_setRiskHandles_right.end()) {
+				saveFaceIndexs(face_handle);
+			}
+		}
+	}
 
 	//检查是否有新的合并任务（添加合并任务到线程池），检查是否完成全部工作（停止线程池）
 	checkMergingAndFinish();
@@ -321,8 +357,6 @@ void Delaunay_Mutithread_CGAL::delaunay_CGAL(SSectionData *sectionData)
 		Vertex_handle vh = sectionData->m_dt.insert(Point2D(ittr->x(), ittr->y()));
 		vh->info() = std::distance(m_vecPointsRef->begin(), ittr);  //
 	}
-
-	sectionData->m_status = SSectionData::Status_Merging;
 
 	if (m_vecSectionData.size() == 1)
 	{
@@ -362,16 +396,16 @@ int Delaunay_Mutithread_CGAL::hasMerging(std::set<std::pair<int, int>>& setMergi
 	std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
 	if (m_vecSectionData.size() < 2)
-		return false;
+		return 0;
 
-	bool bRet = false;
+	std::set<int> setIndexs;
 
 	for (int i = 0; i < m_vecSectionData.size() - 1; ++i)
 	{
 		for (int j = i + 1; j < m_vecSectionData.size(); ++j)
 		{
-			if (m_vecSectionData[i].m_status != SSectionData::Status_Merging
-				|| m_vecSectionData[j].m_status != SSectionData::Status_Merging) 
+			if (m_vecSectionData[i].m_status == SSectionData::Status_Merging
+				|| m_vecSectionData[j].m_status == SSectionData::Status_Merging)
 			{
 				continue;
 			}
@@ -379,11 +413,14 @@ int Delaunay_Mutithread_CGAL::hasMerging(std::set<std::pair<int, int>>& setMergi
 			SSectionData::Orientation ori = orientation(m_vecSectionData[i], m_vecSectionData[j]);
 			if (ori == SSectionData::Near_Left)
 			{
-				if (!m_vecSectionData[i].m_bRightFinishMerge && !m_vecSectionData[j].m_bLeftFinishMerge) 
+				if (!m_vecSectionData[i].m_bRightFinishMerge && !m_vecSectionData[j].m_bLeftFinishMerge)
 				{
-					setMergingIndexs.insert(std::make_pair(i, j));
-					m_vecSectionData[i].m_bRightFinishMerge = true;
-					m_vecSectionData[j].m_bLeftFinishMerge = true;
+					if (setIndexs.insert(i).second && setIndexs.insert(j).second)
+					{
+						setMergingIndexs.insert(std::make_pair(i, j));
+						m_vecSectionData[i].m_status = SSectionData::Status_Merging;
+						m_vecSectionData[j].m_status = SSectionData::Status_Merging;
+					}
 				}
 				break;
 			}
@@ -391,9 +428,12 @@ int Delaunay_Mutithread_CGAL::hasMerging(std::set<std::pair<int, int>>& setMergi
 			{
 				if (!m_vecSectionData[j].m_bRightFinishMerge && !m_vecSectionData[i].m_bLeftFinishMerge)
 				{
-					setMergingIndexs.insert(std::make_pair(j, i));
-					m_vecSectionData[i].m_bRightFinishMerge = true;
-					m_vecSectionData[j].m_bLeftFinishMerge = true;
+					if (setIndexs.insert(i).second && setIndexs.insert(j).second)
+					{
+						setMergingIndexs.insert(std::make_pair(j, i));
+						m_vecSectionData[i].m_status = SSectionData::Status_Merging;
+						m_vecSectionData[j].m_status = SSectionData::Status_Merging;
+					}
 				}
 				break;
 			}
@@ -401,6 +441,7 @@ int Delaunay_Mutithread_CGAL::hasMerging(std::set<std::pair<int, int>>& setMergi
 	}
 	return setMergingIndexs.size();
 }
+
 
 bool Delaunay_Mutithread_CGAL::checkAllFinish() 
 {
@@ -411,22 +452,11 @@ bool Delaunay_Mutithread_CGAL::checkAllFinish()
 	for (int i = 0; i < m_vecSectionData.size(); ++i) 
 	{
 		if (!m_vecSectionData[i].m_bLeftFinishMerge)
-		{
 			++iFinishCount;
-		}
-
 		if (!m_vecSectionData[i].m_bRightFinishMerge) 
-		{
 			++iFinishCount;
-		}
 	}
-
-	if (m_vecSectionData.size() > 1 && iFinishCount > 2)
-	{
-		return false;
-	}
-
-	return true;
+	return iFinishCount <= 0;
 }
 
 void Delaunay_Mutithread_CGAL::sample(float fSampleRatio, int iThreadNum, osg::Vec3Array::iterator begin, osg::Vec3Array::iterator end)
@@ -569,6 +599,17 @@ void Delaunay_Mutithread_CGAL::sample(float fSampleRatio, int iThreadNum, osg::V
 		m_vecSectionData[divNo].m_vecDataIttrs.push_back(ittr);
 	}
 
+	if (!m_vecSectionData.empty()) 
+	{
+		if (m_vecSectionData.size() == 1) 
+		{
+			m_vecSectionData[0].m_bLeftFinishMerge = true;
+			m_vecSectionData[0].m_bRightFinishMerge = false;
+		}
+		m_vecSectionData[0].m_bLeftFinishMerge = true;
+		m_vecSectionData[m_vecSectionData.size()-1].m_bRightFinishMerge = true;
+	}
+
 	return ;
 }
 
@@ -619,6 +660,80 @@ osg::ref_ptr<osg::Geometry> Delaunay_Mutithread_CGAL::createGeometry()
 void Delaunay_Mutithread_CGAL::delaunay()
 {
 	delaunay(m_vecPointsRef->begin(), m_vecPointsRef->end());
+}
+
+int Delaunay_Mutithread_CGAL::getRegularTeatExmapleData(int iVertexNums, float fRatio)
+{
+	//目的：生成100%无重复数据，约束线无相交的数据集
+	int iRowTotal = 10;
+	int iColTotal = 10;
+	float fConstrainRatio = fRatio;
+	if (fConstrainRatio < 0 || fConstrainRatio >= 0.9)
+	{
+		fConstrainRatio = 0.5;
+	}
+
+	if (iVertexNums > 0)
+	{
+		float num = sqrt(iVertexNums);
+		iRowTotal = num + 0.5;
+		iColTotal = num + 0.5;
+	}
+
+	if (iRowTotal < 10) iRowTotal = 10;
+	if (iColTotal < 10) iColTotal = 10;
+
+	int index = 0;
+	float fDilute = 0.01;
+	for (int iRow = 0; iRow < iRowTotal; iRow += 1/*iRowTotal*fDilute*/)
+	{
+		for (int iCol = 0; iCol < iColTotal; iCol += 1/*iColTotal*fDilute*/)
+		{
+			index = iCol + iRow * iColTotal;
+			m_vecPointsRef->push_back(osg::Vec3((float)iRow, (float)iCol, 0.0));
+		}
+	}
+
+	int iConstrainEdgesNum = iRowTotal * iColTotal * fConstrainRatio;
+	int iCount = 0;
+	int iEdgeStartIndex = 0;
+	int iEdgeEndIndex = 0;
+	for (int iRow = 0; iRow < iRowTotal - 1; ++iRow)
+	{
+		for (int iCol = 0; iCol < iColTotal - 1; iCol += 2)
+		{
+			iEdgeStartIndex = iRow + iCol * iRowTotal;
+			iEdgeEndIndex = iRow + (iCol + 1) * iRowTotal;
+
+			++iCount;
+			//m_vecEdges.push_back(std::pair<int, int>(iEdgeStartIndex, iEdgeEndIndex));
+
+			if (iCount >= iConstrainEdgesNum)
+				return 0;
+		}
+	}
+
+	if (iCount < iConstrainEdgesNum)
+	{
+		iEdgeStartIndex = 0;
+		iEdgeEndIndex = 0;
+		for (int iCol = 0; iCol < iColTotal - 1; iCol += 2)
+		{
+			for (int iRow = 0; iRow < iRowTotal - 1; ++iRow)
+			{
+				iEdgeStartIndex = iCol + iRow * iColTotal;
+				iEdgeEndIndex = iCol + (iRow + 1) * iColTotal;
+
+				++iCount;
+				//m_vecEdges.push_back(std::pair<int, int>(iEdgeStartIndex, iEdgeEndIndex));
+
+				if (iCount >= iConstrainEdgesNum)
+					return 0;
+			}
+		}
+	}
+
+	return 0;
 }
 
 /*

@@ -75,13 +75,12 @@ struct Face
 		}
 	}
 
-	Face(unsigned int index1, unsigned int index2, unsigned int index3)
+	Face(unsigned int index1, unsigned int index2, unsigned int index3, bool bRisk = true)
 	{
 		if (index1 > index2) {
 			this->index1 = index1;
 			this->index2 = index2;
-		}
-		else {
+		} else {
 			this->index1 = index2;
 			this->index2 = index1;
 		}
@@ -93,8 +92,7 @@ struct Face
 			this->index1 = this->index3;
 			this->index3 = this->index2;
 			this->index2 = tmp;
-		}
-		else {
+		} else {
 			if (this->index3 > this->index2) {
 				tmp = this->index3;
 				this->index3 = this->index2;
@@ -108,12 +106,13 @@ struct Face
 		index1 = face.index1;
 		index2 = face.index2;
 		index3 = face.index3;
+
 		return *this;
 	}
 
 	bool operator<(const Face& face) const
 	{
-		if (index1 != face.index1) 
+		if (index1 != face.index1)
 			return index1 < face.index1;
 
 		if (index2 != face.index2)
@@ -167,6 +166,8 @@ public:
 
 	void Delaunay_Mutithread_CGAL::readInputFromFile(const std::string& fileName);
 
+	int getRegularTeatExmapleData(int iVertexNums, float fRatio);
+
 	osg::ref_ptr<osg::Geometry> createGeometry();
 
 	void delaunay();
@@ -176,6 +177,8 @@ public:
 	void delaunay(osg::Vec3Array::iterator begin, osg::Vec3Array::iterator end);
 
 	void saveFaceIndexs(Face_handle fh);
+
+	void saveFaceIndexs(unsigned int index1, unsigned int index2, unsigned int index3);
 
 	struct SSectionData
 	{
@@ -214,7 +217,8 @@ public:
 		typedef osg::Vec3Array::iterator DataIttr;
 		std::vector<DataIttr> m_vecDataIttrs;
 
-		std::vector<Face_handle> m_vecRiskHandles;
+		std::set<Face_handle> m_setRiskHandles_left;
+		std::set<Face_handle> m_setRiskHandles_right;
 
 		std::deque<Face_handle> m_deqBarrierFaces;
 
@@ -467,22 +471,26 @@ public:
 				m_dTop = y;
 		}
 
-		bool check_circle_intersect(Face_handle handle, Segment_2& seg) 
+		bool check_circle_intersect(Face_handle handle, Segment_2& seg, Orientation ori)
 		{
-			Point2D& p1 = handle->vertex(0)->point();
-			Point2D& p2 = handle->vertex(1)->point();
-			Point2D& p3 = handle->vertex(2)->point();
+			Point2D p1 = handle->vertex(0)->point();
+			Point2D p2 = handle->vertex(1)->point();
+			Point2D p3 = handle->vertex(2)->point();
 			Circle_2 cir(p1, p2, p3);
 
 			if (CGAL::do_intersect(cir, seg))
 			{
-				m_vecRiskHandles.push_back(handle);
+				if (ori == Near_Left) {
+					m_setRiskHandles_left.insert(handle);
+				} else {
+					m_setRiskHandles_right.insert(handle);
+				}
+				
 				m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(handle->vertex(0)->info(), handle->vertex(0)));
 				m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(handle->vertex(1)->info(), handle->vertex(1)));
 				m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(handle->vertex(2)->info(), handle->vertex(2)));
 				Face face(handle->vertex(0)->info(), handle->vertex(1)->info(), handle->vertex(2)->info());
 				m_facesmap.insert(std::pair<Face, bool>(face, false));
-
 				return true;
 			}
 
@@ -522,10 +530,17 @@ public:
 			h3->info() = handle->vertex(2)->info();
 		}
 
-		void insert_risk_delaunay(SSectionData& other)
+		void insert_risk_delaunay(SSectionData& other, Orientation ori)
 		{
-			for (auto& handle : other.m_vecRiskHandles)
-				insert_delaunay(handle);
+			if (ori == Near_Left) {
+				for (auto handle : other.m_setRiskHandles_left) {
+					insert_delaunay(handle);
+				}
+			} else {
+				for (auto handle : other.m_setRiskHandles_right) {
+					insert_delaunay(handle);
+				}
+			}
 		}
 
 		void insert_tangent_delaunay(SSectionData& graph1, SSectionData& graph2) 
@@ -548,9 +563,9 @@ public:
 
 		bool check_face_intersect(Face_handle& handle, Segment_2 seg)
 		{
-			Point2D& p1 = handle->vertex(0)->point();
-			Point2D& p2 = handle->vertex(1)->point();
-			Point2D& p3 = handle->vertex(2)->point();
+			Point2D p1 = handle->vertex(0)->point();
+			Point2D p2 = handle->vertex(1)->point();
+			Point2D p3 = handle->vertex(2)->point();
 
 			Segment_2 seg1(p1, p2);
 			Segment_2 seg2(p1, p3);
