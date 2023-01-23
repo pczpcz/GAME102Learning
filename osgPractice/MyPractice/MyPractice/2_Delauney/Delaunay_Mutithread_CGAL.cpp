@@ -64,7 +64,7 @@ void Delaunay_Mutithread_CGAL::delaunay(osg::Vec3Array::iterator begin, osg::Vec
 	int iThreadNum = getThreadNum(size);
 
 	//测试
-	iThreadNum = 3;
+	iThreadNum = 2;
 
 	unsigned int vertexPerthread = size / iThreadNum;
 	std::thread *pThreads = new std::thread[iThreadNum];
@@ -271,14 +271,14 @@ void Delaunay_Mutithread_CGAL::merge(SSectionData* section1, SSectionData* secti
 	{
 		//计算这个面的外接圆 和 它的左右两个分区是否有交叉，如果有, 将这个面认为是有风险的面
 		if (!section1->check_circle_intersect(face_handle, seg, SSectionData::Near_Right)) {
-			//saveFaceIndexs(face_handle);
+			//saveFaceIndexs(face_handle);	//for debug
 		}
 	}
 	for (auto face_handle : section2->m_dt.finite_face_handles())
 	{
 		//计算这个面的外接圆 和 它的左右两个分区是否有交叉，如果有, 将这个面认为是有风险的面
 		if (!section2->check_circle_intersect(face_handle, seg, SSectionData::Near_Left)) {
-			//saveFaceIndexs(face_handle);
+			//saveFaceIndexs(face_handle);  //for debug
 		}
 	}
 
@@ -290,7 +290,7 @@ void Delaunay_Mutithread_CGAL::merge(SSectionData* section1, SSectionData* secti
 	//挑选出安全面，并检查跨边面和重复，为合并做准备
 	for (Face_handle face_handle : deplicateSection.m_dt.finite_face_handles())
 	{
-		//saveFaceIndexs(face_handle);
+		//saveFaceIndexs(face_handle);       //for debug
 
 		//检查是否跨边的面, 与合并前的面重复的面
 		if (section1->check_face_intersect(face_handle, seg)
@@ -350,10 +350,9 @@ void Delaunay_Mutithread_CGAL::delaunay_CGAL(SSectionData *sectionData)
 	if (!sectionData || sectionData->m_vecDataIttrs.empty())
 		return;
 
-	//1. 先进行一次三角化
+	//先进行一次三角化
 	for (auto &ittr : sectionData->m_vecDataIttrs)
 	{
-		//也可以封装到sectionData里面
 		Vertex_handle vh = sectionData->m_dt.insert(Point2D(ittr->x(), ittr->y()));
 		vh->info() = std::distance(m_vecPointsRef->begin(), ittr);  //
 	}
@@ -671,8 +670,8 @@ void Delaunay_Mutithread_CGAL::delaunay()
 int Delaunay_Mutithread_CGAL::getRegularTeatExmapleData(int iVertexNums, float fRatio)
 {
 	//目的：生成100%无重复数据，约束线无相交的数据集
-	int iRowTotal = 10;
-	int iColTotal = 10;
+	int iRowTotal = 5;
+	int iColTotal = 5;
 	float fConstrainRatio = fRatio;
 	if (fConstrainRatio < 0 || fConstrainRatio >= 0.9)
 	{
@@ -686,8 +685,8 @@ int Delaunay_Mutithread_CGAL::getRegularTeatExmapleData(int iVertexNums, float f
 		iColTotal = num + 0.5;
 	}
 
-	if (iRowTotal < 10) iRowTotal = 10;
-	if (iColTotal < 10) iColTotal = 10;
+	if (iRowTotal < 5) iRowTotal = 5;
+	if (iColTotal < 5) iColTotal = 5;
 
 	int index = 0;
 	float fDilute = 0.01;

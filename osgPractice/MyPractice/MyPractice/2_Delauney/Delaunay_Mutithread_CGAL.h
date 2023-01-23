@@ -340,6 +340,53 @@ public:
 			return false;
 		}
 
+		Vertex_handle get_ccw_first_vertex(Vertex_handle vh_base, std::vector<Vertex_handle> vecVCandidates)
+		{
+			if (vecVCandidates.empty())
+				return Vertex_handle();
+
+			Vertex_handle vh_target = vecVCandidates[0];
+			for (int i = 1; i < vecVCandidates.size(); ++i) 
+			{
+				CGAL::Orientation ori = CGAL::orientation(vh_base->point(), vh_target->point(), vecVCandidates[i]->point());
+				if (CGAL::RIGHT_TURN == ori) {
+					vh_target = vecVCandidates[i];
+				} else if (CGAL::COLLINEAR == ori) 
+				{
+					//如果共线选择最近的那个
+					CGAL::Comparison_result ret = CGAL::compare_distance_to_point(vh_base->point(), vh_target->point(), vecVCandidates[i]->point());
+					if (CGAL::LARGER == ret) {
+						vh_target = vecVCandidates[i];
+					}
+				}
+			}
+			return vh_target;
+		}
+
+		Vertex_handle get_cw_first_vertex(Vertex_handle vh_base, std::vector<Vertex_handle> &vecVCandidates)
+		{
+			if (vecVCandidates.empty())
+				return Vertex_handle();
+
+			Vertex_handle vh_target = vecVCandidates[0];
+			for (int i = 1; i < vecVCandidates.size(); ++i)
+			{
+				CGAL::Orientation ori = CGAL::orientation(vh_base->point(), vh_target->point(), vecVCandidates[i]->point());
+				if (CGAL::LEFT_TURN == ori) {
+					vh_target = vecVCandidates[i];
+				}
+				else if (CGAL::COLLINEAR == ori)
+				{
+					//如果共线选择最近的那个
+					CGAL::Comparison_result ret = CGAL::compare_distance_to_point(vh_base->point(), vh_target->point(), vecVCandidates[i]->point());
+					if (CGAL::LARGER == ret) {
+						vh_target = vecVCandidates[i];
+					}
+				}
+			}
+			return vh_target;
+		}
+
 		//遍历到上切线，去重后，将顶点加入到三角化中(zig_zag)
 		void get_up_tangent_vetex(SSectionData& leftGraph, SSectionData& rightGraph, std::vector<Vertex_handle>& vecVHandles)
 		{
@@ -349,54 +396,71 @@ public:
 				return;
 
 			std::set<Vertex_handle> VertexIndexsSet;
-			std::deque<Vertex_handle> deque_vertexs_left;
-			std::deque<Vertex_handle> deque_vertexs_right;
-			deque_vertexs_left.push_back(hvl);
-			deque_vertexs_right.push_back(hvr);
+			VertexIndexsSet.insert(hvl);
+			VertexIndexsSet.insert(hvr);
 			vecVHandles.push_back(hvl);
 			vecVHandles.push_back(hvr);
-			while (!deque_vertexs_left.empty() || !deque_vertexs_right.empty())
+			std::vector<Vertex_handle> vecVCandidates;
+			bool bLeftUpdate = true;
+			bool bRightUpdate = true;
+			while (bLeftUpdate || bRightUpdate)
 			{
-				if (!deque_vertexs_left.empty())
+				if (bLeftUpdate || bRightUpdate)
 				{
-					hvl = deque_vertexs_left.front();
-					deque_vertexs_left.pop_front();
 					if (leftGraph.m_dt.is_infinite(hvl))
 						continue;
 
 					VCirculator ccl = leftGraph.m_dt.incident_vertices(hvl);
 					VCirculator ccl_end(ccl);
+					vecVCandidates.clear();
 					do {
 						if (!leftGraph.m_dt.is_infinite(ccl->handle()) && is_border(leftGraph, ccl->handle())) {
-							if (VertexIndexsSet.insert(ccl->handle()).second) {
+							if (VertexIndexsSet.find(ccl->handle()) == VertexIndexsSet.end()) {
 								if (CGAL::RIGHT_TURN != CGAL::orientation(hvl->point(), hvr->point(), ccl->handle()->point())) {
-									deque_vertexs_left.push_back(ccl->handle());
-									vecVHandles.push_back(ccl->handle());
+									vecVCandidates.push_back(ccl->handle());
 								}
 							}
 						}
 					} while (++ccl != ccl_end);
+
+					Vertex_handle vh_next_border = get_ccw_first_vertex(hvl, vecVCandidates);
+					if (Vertex_handle() != vh_next_border) {
+						vecVHandles.push_back(vh_next_border);
+						VertexIndexsSet.insert(vh_next_border);
+						hvl = vh_next_border;
+						bLeftUpdate = true;
+					} else {
+						bLeftUpdate = false;
+					}
 				}
 
-				if (!deque_vertexs_right.empty())
+				if (bLeftUpdate || bRightUpdate)
 				{
-					hvr = deque_vertexs_right.front();
-					deque_vertexs_right.pop_front();
 					if (rightGraph.m_dt.is_infinite(hvr))
 						continue;
 
+					vecVCandidates.clear();
 					VCirculator ccr = rightGraph.m_dt.incident_vertices(hvr);
 					VCirculator ccr_end(ccr);
 					do {
 						if (!rightGraph.m_dt.is_infinite(ccr->handle()) && is_border(rightGraph, ccr->handle())) {
-							if (VertexIndexsSet.insert(ccr->handle()).second) {
+							if (VertexIndexsSet.find(ccr->handle()) == VertexIndexsSet.end()) {
 								if (CGAL::RIGHT_TURN != CGAL::orientation(hvl->point(), hvr->point(), ccr->handle()->point())) {
-									deque_vertexs_left.push_back(ccr->handle());
-									vecVHandles.push_back(ccr->handle());
+									vecVCandidates.push_back(ccr->handle());
 								}
 							}
 						}
 					} while (++ccr != ccr_end);
+
+					Vertex_handle vh_next_border = get_cw_first_vertex(hvr, vecVCandidates);
+					if (Vertex_handle() != vh_next_border) {
+						vecVHandles.push_back(vh_next_border);
+						VertexIndexsSet.insert(vh_next_border);
+						hvr = vh_next_border;
+						bRightUpdate = true;
+					} else {
+						bRightUpdate = false;
+					}
 				}
 			}
 		}
@@ -410,54 +474,71 @@ public:
 				return;
 
 			std::set<Vertex_handle> VertexIndexsSet;
-			std::deque<Vertex_handle> deque_vertexs_left;
-			std::deque<Vertex_handle> deque_vertexs_right;
-			deque_vertexs_left.push_back(hvl);
-			deque_vertexs_right.push_back(hvr);
+			VertexIndexsSet.insert(hvl);
+			VertexIndexsSet.insert(hvr);
 			vecVHandles.push_back(hvl);
 			vecVHandles.push_back(hvr);
-			while (!deque_vertexs_left.empty() || !deque_vertexs_right.empty())
+			std::vector<Vertex_handle> vecVCandidates;
+			bool bLeftUpdate = true;
+			bool bRightUpdate = true;
+			while (bLeftUpdate || bRightUpdate)
 			{
-				if (!deque_vertexs_left.empty())
+				if (bLeftUpdate || bRightUpdate)
 				{
-					hvl = deque_vertexs_left.front();
-					deque_vertexs_left.pop_front();
 					if (leftGraph.m_dt.is_infinite(hvl))
 						continue;
 
 					VCirculator ccl = leftGraph.m_dt.incident_vertices(hvl);
 					VCirculator ccl_end(ccl);
+					vecVCandidates.clear();
 					do {
 						if (!leftGraph.m_dt.is_infinite(ccl->handle()) && is_border(leftGraph, ccl->handle())) {
-							if (VertexIndexsSet.insert(ccl->handle()).second) {
+							if (VertexIndexsSet.find(ccl->handle()) == VertexIndexsSet.end()) {
 								if (CGAL::LEFT_TURN != CGAL::orientation(hvl->point(), hvr->point(), ccl->handle()->point())) {
-									deque_vertexs_left.push_back(ccl->handle());
-									vecVHandles.push_back(ccl->handle());
+									vecVCandidates.push_back(ccl->handle());
 								}
 							}
 						}
 					} while (++ccl != ccl_end);
+
+					Vertex_handle vh_next_border = get_cw_first_vertex(hvl, vecVCandidates);
+					if (Vertex_handle() != vh_next_border) {
+						vecVHandles.push_back(vh_next_border);
+						VertexIndexsSet.insert(vh_next_border);
+						hvl = vh_next_border;
+						bLeftUpdate = true;
+					} else  {
+						bLeftUpdate = false;
+					}
 				}
 
-				if (!deque_vertexs_right.empty())
+				if (bLeftUpdate || bRightUpdate)
 				{
-					hvr = deque_vertexs_right.front();
-					deque_vertexs_right.pop_front();
 					if (rightGraph.m_dt.is_infinite(hvr))
 						continue;
 
+					vecVCandidates.clear();
 					VCirculator ccr = rightGraph.m_dt.incident_vertices(hvr);
 					VCirculator ccr_end(ccr);
 					do {
 						if (!rightGraph.m_dt.is_infinite(ccr->handle()) && is_border(rightGraph, ccr->handle())) {
-							if (VertexIndexsSet.insert(ccr->handle()).second) {
+							if (VertexIndexsSet.find(ccr->handle()) == VertexIndexsSet.end()) {
 								if (CGAL::LEFT_TURN != CGAL::orientation(hvl->point(), hvr->point(), ccr->handle()->point())) {
-									deque_vertexs_left.push_back(ccr->handle());
-									vecVHandles.push_back(ccr->handle());
+									vecVCandidates.push_back(ccr->handle());
 								}
 							}
 						}
 					} while (++ccr != ccr_end);
+
+					Vertex_handle vh_next_border = get_ccw_first_vertex(hvr, vecVCandidates);
+					if (Vertex_handle() != vh_next_border) {
+						vecVHandles.push_back(vh_next_border);
+						VertexIndexsSet.insert(vh_next_border);
+						hvr = vh_next_border;
+						bRightUpdate = true;
+					} else {
+						bRightUpdate = false;
+					}
 				}
 			}
 		}
