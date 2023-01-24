@@ -3,8 +3,9 @@
 
 Delaunay_Mutithread_CGAL::Delaunay_Mutithread_CGAL()
 {
+	CLog::getInstance();
+
 	m_vecPointsRef = new osg::Vec3Array;
-	//m_PrimitveSetRef = new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES);
 }
 
 Delaunay_Mutithread_CGAL::~Delaunay_Mutithread_CGAL()
@@ -36,7 +37,7 @@ int Delaunay_Mutithread_CGAL::getThreadNum(size_t size)
 
 	int iThreadNum = 2;
 	iThreadNum = size / iVertexPerThread;
-	if (iThreadNum <= 0)
+	if (iThreadNum <= 1)
 		iThreadNum = 2;
 	if (iThreadNum >= iMaxThread)
 		iThreadNum = iMaxThread;
@@ -64,17 +65,17 @@ void Delaunay_Mutithread_CGAL::delaunay(osg::Vec3Array::iterator begin, osg::Vec
 	int iThreadNum = getThreadNum(size);
 
 	//测试
-	iThreadNum = 2;
+	//iThreadNum = 1;
 
 	unsigned int vertexPerthread = size / iThreadNum;
-	std::thread *pThreads = new std::thread[iThreadNum];
+	//std::thread *pThreads = new std::thread[iThreadNum];
 
 	if (!m_pThreadPool)
 		m_pThreadPool = new CThreadPool;
 	m_pThreadPool->setThreadNum(iThreadNum);
 
 	//进行预采样，以实现负载均衡
-	//sample(0.5, iThreadNum, begin, end);
+	//sample(0.3, iThreadNum, begin, end);
 	sample(1.0, iThreadNum, begin, end);
 
 	if (m_vecSectionData.empty())
@@ -231,24 +232,15 @@ void Delaunay_Mutithread_CGAL::delaunay(osg::Vec3Array::iterator begin, osg::Vec
 	  p4 *
 */
 
-void Delaunay_Mutithread_CGAL::saveFaceIndexs(Face_handle fh) 
+void Delaunay_Mutithread_CGAL::saveFaceIndexs(Face_handle fh, int iPrimitiveIndex) 
 {
-	std::lock_guard<std::recursive_mutex> lock(m_mutex);
-	if (!m_PrimitveSetRef)
-		m_PrimitveSetRef = new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES);
-	m_PrimitveSetRef->push_back(fh->vertex(0)->info());
-	m_PrimitveSetRef->push_back(fh->vertex(1)->info());
-	m_PrimitveSetRef->push_back(fh->vertex(2)->info());
-}
-
-void Delaunay_Mutithread_CGAL::saveFaceIndexs(unsigned int index1, unsigned int index2, unsigned int index3) 
-{
-	std::lock_guard<std::recursive_mutex> lock(m_mutex);
-	if (!m_PrimitveSetRef)
-		m_PrimitveSetRef = new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES);
-	m_PrimitveSetRef->push_back(index1);
-	m_PrimitveSetRef->push_back(index2);
-	m_PrimitveSetRef->push_back(index3);
+	//std::lock_guard<std::recursive_mutex> lock(m_mutex);
+	if (iPrimitiveIndex >= 0 && iPrimitiveIndex < m_vecPrimitiveRefs.size() && m_vecPrimitiveRefs[iPrimitiveIndex])
+	{
+		m_vecPrimitiveRefs[iPrimitiveIndex]->push_back(fh->vertex(0)->info());
+		m_vecPrimitiveRefs[iPrimitiveIndex]->push_back(fh->vertex(1)->info());
+		m_vecPrimitiveRefs[iPrimitiveIndex]->push_back(fh->vertex(2)->info());
+	}
 }
 
 Delaunay_Mutithread_CGAL::SSectionData::Orientation Delaunay_Mutithread_CGAL::orientation(SSectionData& section1, SSectionData& section2)
@@ -258,6 +250,8 @@ Delaunay_Mutithread_CGAL::SSectionData::Orientation Delaunay_Mutithread_CGAL::or
 
 void Delaunay_Mutithread_CGAL::merge(SSectionData* section1, SSectionData* section2)
 {
+	log(*section1, *section2, _T(__FUNCTION__));
+
 	if (!section1 || !section2)
 		return;
 
@@ -282,10 +276,14 @@ void Delaunay_Mutithread_CGAL::merge(SSectionData* section1, SSectionData* secti
 		}
 	}
 
+	log(*section1, *section2, _T("---------1------------"));
+
 	//对非安全面重新进行三角化
 	deplicateSection.insert_risk_delaunay(*section1, SSectionData::Near_Right);
 	deplicateSection.insert_risk_delaunay(*section2, SSectionData::Near_Left);
 	deplicateSection.insert_tangent_delaunay(*section1, *section2);
+
+	log(*section1, *section2, _T("---------2------------"));
 
 	//挑选出安全面，并检查跨边面和重复，为合并做准备
 	for (Face_handle face_handle : deplicateSection.m_dt.finite_face_handles())
@@ -294,38 +292,41 @@ void Delaunay_Mutithread_CGAL::merge(SSectionData* section1, SSectionData* secti
 
 		//检查是否跨边的面, 与合并前的面重复的面
 		if (section1->check_face_intersect(face_handle, seg)
-			|| section2->check_face_intersect(face_handle, seg)
 			|| section1->check_face_duplicate(face_handle)
+			|| section2->check_face_intersect(face_handle, seg)
 			|| section2->check_face_duplicate(face_handle))
 		{
 			deplicateSection.m_deqBarrierFaces.push_back(face_handle);
 			deplicateSection.m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(face_handle->vertex(0)->info(), face_handle->vertex(0)));
 			deplicateSection.m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(face_handle->vertex(1)->info(), face_handle->vertex(1)));
 			deplicateSection.m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(face_handle->vertex(2)->info(), face_handle->vertex(2)));
-			saveFaceIndexs(face_handle);
+			saveFaceIndexs(face_handle, section1->m_iPrimitiveIndex);
 		}
 	}
+
+	log(*section1, *section2, _T("---------3------------"));
 
 	//合并（将重新三角化的面与合并前的进行比对）
 	std::vector<Face_handle> vecMergeResult;
 	deplicateSection.merge(vecMergeResult, *section1, *section2);
 	for (auto& handle : vecMergeResult)
 	{
-		saveFaceIndexs(handle);
+		saveFaceIndexs(handle, section1->m_iPrimitiveIndex);
 	}
+
+	log(*section1, *section2, _T("---------4------------"));
 
 	section1->m_bRightFinishMerge = true;
 	section2->m_bLeftFinishMerge = true;
-	section1->m_status = SSectionData::Status_Finish;
-	section2->m_status = SSectionData::Status_Finish;
 
-	if (section1->m_bLeftFinishMerge && section1->m_bRightFinishMerge) 
+	//输出最早识别出来的那部分安全三角形（check_circle_intersect）
+	if (section1->m_bLeftFinishMerge && section1->m_bRightFinishMerge)
 	{
 		for (auto face_handle : section1->m_dt.finite_face_handles()) {
 			auto ittr_left = section1->m_setRiskHandles_left.find(face_handle);
 			auto ittr_right = section1->m_setRiskHandles_right.find(face_handle);
 			if (ittr_left == section1->m_setRiskHandles_left.end() && ittr_right == section1->m_setRiskHandles_right.end()) {
-				saveFaceIndexs(face_handle);
+				saveFaceIndexs(face_handle, section1->m_iPrimitiveIndex);
 			}
 		}
 	}
@@ -336,17 +337,26 @@ void Delaunay_Mutithread_CGAL::merge(SSectionData* section1, SSectionData* secti
 			auto ittr_left = section2->m_setRiskHandles_left.find(face_handle);
 			auto ittr_right = section2->m_setRiskHandles_right.find(face_handle);
 			if (ittr_left == section2->m_setRiskHandles_left.end() && ittr_right == section2->m_setRiskHandles_right.end()) {
-				saveFaceIndexs(face_handle);
+				saveFaceIndexs(face_handle, section2->m_iPrimitiveIndex);
 			}
 		}
 	}
 
+	log(*section1, *section2, _T("---------5------------"));
+
+	//处理线程同步状态(现在通过线程池轮询的方法，如果使用条件唤醒线程，可能效率要高一点)
+	std::lock_guard<std::recursive_mutex> lock(m_mutex);
+	section1->m_status = SSectionData::Status_Finish;
+	section2->m_status = SSectionData::Status_Finish;
+	
 	//检查是否有新的合并任务（添加合并任务到线程池），检查是否完成全部工作（停止线程池）
 	checkMergingAndFinish();
 }
 
 void Delaunay_Mutithread_CGAL::delaunay_CGAL(SSectionData *sectionData)
 {
+	log(*sectionData, *sectionData, _T(__FUNCTION__));
+
 	if (!sectionData || sectionData->m_vecDataIttrs.empty())
 		return;
 
@@ -359,12 +369,13 @@ void Delaunay_Mutithread_CGAL::delaunay_CGAL(SSectionData *sectionData)
 
 	if (m_vecSectionData.size() == 1)
 	{
-		for (auto& face_handle : m_vecSectionData[0].m_dt.finite_face_handles()) 
+		for (auto& face_handle : m_vecSectionData[0].m_dt.finite_face_handles())
 		{
-			saveFaceIndexs(face_handle);
+			saveFaceIndexs(face_handle, 0);
 		}
 	}
 
+	std::lock_guard<std::recursive_mutex> lock(m_mutex);
 	sectionData->m_status = SSectionData::Status_Tri;
 
 	//检查是否有新的合并任务（添加合并任务到线程池），检查是否完成全部工作（停止线程池）
@@ -375,6 +386,8 @@ void Delaunay_Mutithread_CGAL::delaunay_CGAL(SSectionData *sectionData)
 
 void Delaunay_Mutithread_CGAL::checkMergingAndFinish()
 {
+	std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 	//检查是否有可以合并的分区（>=2）,如果有，就添加到任务队列
 	std::set<std::pair<int, int>> setMergeIndexs;
 	if (hasMerging(setMergeIndexs))
@@ -394,7 +407,7 @@ void Delaunay_Mutithread_CGAL::checkMergingAndFinish()
 
 int Delaunay_Mutithread_CGAL::hasMerging(std::set<std::pair<int, int>>& setMergingIndexs)
 {
-	std::lock_guard<std::recursive_mutex> lock(m_mutex);
+	//std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
 	if (m_vecSectionData.size() < 2)
 		return 0;
@@ -445,10 +458,9 @@ int Delaunay_Mutithread_CGAL::hasMerging(std::set<std::pair<int, int>>& setMergi
 	return setMergingIndexs.size();
 }
 
-
-bool Delaunay_Mutithread_CGAL::checkAllFinish() 
+bool Delaunay_Mutithread_CGAL::checkAllFinish()
 {
-	std::lock_guard<std::recursive_mutex> lock(m_mutex);
+	//std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
 	//m_vecSectionData分区的数据是线程启动前就已经加入了
 	int iFinishCount = 0;
@@ -482,15 +494,17 @@ void Delaunay_Mutithread_CGAL::sample(float fSampleRatio, int iThreadNum, osg::V
 	m_vecSectionData.resize(iThreadNum);
 	if (iThreadNum == 1)
 	{
+		m_vecPrimitiveRefs.push_back(new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES));
+		m_vecSectionData[0].m_iPrimitiveIndex = 0;
+		m_vecSectionData[0].m_iSampleBeginX = 0;
+		//m_vecSectionData[0].m_status = SSectionData::Status_Idle;
+		m_vecSectionData[0].m_iSampleEndX = 1;	 //暂时只考虑横向的划分
+		m_vecSectionData[0].m_bLeftFinishMerge = true;
+		m_vecSectionData[0].m_bRightFinishMerge = true;
 		for (auto ittr = begin; ittr != end; ++ittr)
 		{
-			m_vecSectionData[0].m_iSampleBeginX = 0;
-			//m_vecSectionData[0].m_status = SSectionData::Status_Idle;
-			m_vecSectionData[0].m_iSampleEndX = 1;	 //暂时只考虑横向的划分
 			m_vecSectionData[0].boundingBox(ittr->x(), ittr->y());
 			m_vecSectionData[0].m_vecDataIttrs.push_back(ittr);
-			m_vecSectionData[0].m_bLeftFinishMerge = true;
-			m_vecSectionData[0].m_bRightFinishMerge = true;
 		}
 		return;
 	}
@@ -505,6 +519,9 @@ void Delaunay_Mutithread_CGAL::sample(float fSampleRatio, int iThreadNum, osg::V
 		m_vecSectionData[i].m_iSampleBeginX = i;
 		m_vecSectionData[i].m_iSampleEndX = (i + 1);
 		//m_vecSectionData[i].m_status = SSectionData::Status_Idle;
+
+		m_vecSectionData[i].m_iPrimitiveIndex = i;
+		m_vecPrimitiveRefs.push_back(new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES));
 	}
 
 	//1. 随机采样确认数据分布(如何防止溢出啊)
@@ -514,10 +531,10 @@ void Delaunay_Mutithread_CGAL::sample(float fSampleRatio, int iThreadNum, osg::V
 	unsigned int randOffset = 0;
 	double dMax_x = MIN_DOUBLE;
 	double dMin_x = MAX_DOUBLE;
-	for (; setSamples.size() < totalSampleNum; )
+	//for (; setSamples.size() < totalSampleNum; )
+	for (; randOffset < totalSampleNum; ++randOffset)
 	{
-		randOffset = rand() % size;
-		//randOffset = i;
+		//randOffset = rand() % size;
 		auto ittr = begin + randOffset;
 		setSamples.insert(ittr);
 
@@ -654,10 +671,11 @@ void Delaunay_Mutithread_CGAL::readInputFromFile(const std::string& fileName)
 osg::ref_ptr<osg::Geometry> Delaunay_Mutithread_CGAL::createGeometry()
 {
 	osg::ref_ptr<osg::Geometry> geometry = new osg::Geometry;
-	if (m_PrimitveSetRef) 
+	if (!m_vecPrimitiveRefs.empty())
 	{
 		geometry->setVertexArray(m_vecPointsRef.get());
-		geometry->addPrimitiveSet(m_PrimitveSetRef.get());
+		for (auto ref : m_vecPrimitiveRefs)
+			geometry->addPrimitiveSet(ref.get());
 	}
 	return geometry.release();
 }
@@ -739,6 +757,56 @@ int Delaunay_Mutithread_CGAL::getRegularTeatExmapleData(int iVertexNums, float f
 	}
 
 	return 0;
+}
+
+void Delaunay_Mutithread_CGAL::log(Delaunay_Mutithread_CGAL::SSectionData& sectionData1, Delaunay_Mutithread_CGAL::SSectionData& sectionData2, const CString& strFun)
+{
+	std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+	CString strTime;
+	CTime tmNow = CTime::GetCurrentTime();
+	strTime = tmNow.Format(_T("%Y-%m-%d %H:%M:%S"));
+
+	CString strLog1;
+	strLog1.Format(_T("%s, BlockNo(%d, %d), status=%d, left_merge_status = %d, right_merge_status = %d, data.size() = %u, %u,%u,%u,%u,%u, (%s)\n\n"),
+				  strFun,
+				  sectionData1.m_iSampleBeginX, 
+				  sectionData1.m_iSampleEndX, 
+				  sectionData1.m_status, 
+				  sectionData1.m_bLeftFinishMerge, 
+				  sectionData1.m_bRightFinishMerge,
+				  sectionData1.m_vecDataIttrs.size(),
+				  sectionData1.m_setRiskHandles_left.size(),
+				  sectionData1.m_setRiskHandles_right.size(), 
+				  sectionData1.m_deqBarrierFaces.size(),
+				  sectionData1.m_vertexHashtable.size(),
+				  sectionData1.m_facesmap.size(),
+				  strTime);
+
+	CString strLog2;
+	strLog2.Format(_T("%s, BlockNo(%d, %d), status=%d, left_merge_status = %d, right_merge_status = %d, data.size() = %u, %u,%u,%u,%u,%u, (%s)\n\n"),
+		strFun,
+		sectionData2.m_iSampleBeginX,
+		sectionData2.m_iSampleEndX,
+		sectionData2.m_status,
+		sectionData2.m_bLeftFinishMerge,
+		sectionData2.m_bRightFinishMerge,
+		sectionData2.m_vecDataIttrs.size(),
+		sectionData2.m_setRiskHandles_left.size(),
+		sectionData2.m_setRiskHandles_right.size(),
+		sectionData2.m_deqBarrierFaces.size(),
+		sectionData2.m_vertexHashtable.size(),
+		sectionData2.m_facesmap.size(),
+		strTime);
+
+	strLog1 += strLog2;
+
+#ifdef DEBUG
+	//TRACE(strLog);
+	CLog::getInstance().LOG(strLog1);
+#else
+	CLog::getInstance().LOG(strLog1);
+#endif
 }
 
 /*

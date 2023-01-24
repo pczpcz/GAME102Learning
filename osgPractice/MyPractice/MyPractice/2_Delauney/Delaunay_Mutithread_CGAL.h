@@ -27,7 +27,13 @@
 
 #include "ThreadPool.h"
 
-//#include "..\ntm_tin_producing_context.hpp"
+#include "../pch.h"
+
+//zcp: 2023/01/24
+//遗留问题：
+//TODO：单划分到某个分区的所有点都处于一条直线上面时，这些点将不会出现在最终的合并结果中，相当于部分三角形被删除了
+//复现方法： step1: mutithread_delaunay.getRegularTeatExmapleData(5, 0.0); step2: 线程数设为3
+
 
 #define MAX_DOUBLE		((std::numeric_limits<double>::max)());
 #define MIN_DOUBLE		((std::numeric_limits<double>::min)());
@@ -149,47 +155,14 @@ public:
 	typedef K::Point_2																Point_2;
 	typedef CGAL::Segment_2<K>														Segment_2;
 	typedef CGAL::Circle_2<K>														Circle_2;
-	/*
-	typedef CGAL::Projection_traits_xy_3<K>  Gt;
-	typedef CGAL::Delaunay_triangulation_2<Gt> Delaunay;
-	typedef K::Point_3   Point;
-	typedef Delaunay::Finite_face_handles Face_handles;
-	typedef Delaunay::Face_handle face_handle;
-	typedef Delaunay::Vertex_handle Vertex_handle;
-
-	typedef Delaunay::Finite_face_handles Face_handles;
-	typedef Delaunay::Face_handle face_handle;
-	typedef Delaunay::Vertex_handle Vertex_handle;*/
-
-	Delaunay_Mutithread_CGAL();
-
-	~Delaunay_Mutithread_CGAL();
-
-	void read_data();
-
-	void Delaunay_Mutithread_CGAL::readInputFromFile(const std::string& fileName);
-
-	int getRegularTeatExmapleData(int iVertexNums, float fRatio);
-
-	osg::ref_ptr<osg::Geometry> createGeometry();
-
-	void delaunay();
-
-	int getThreadNum(size_t size);
-
-	void delaunay(osg::Vec3Array::iterator begin, osg::Vec3Array::iterator end);
-
-	void saveFaceIndexs(Face_handle fh);
-
-	void saveFaceIndexs(unsigned int index1, unsigned int index2, unsigned int index3);
 
 	struct SSectionData
 	{
 		enum Orientation
 		{
+			Not_Near,
 			Near_Left,
-			Near_Right,
-			Not_Near
+			Near_Right
 		};
 
 		enum Status
@@ -203,6 +176,8 @@ public:
 		//分区编号，用于判断是否全部合并结束，或者用于确定分区范围（由采样决定）
 		int m_iSampleBeginX;
 		int m_iSampleEndX;
+
+		int m_iPrimitiveIndex;
 
 		Status m_status;
 
@@ -239,6 +214,8 @@ public:
 			m_iSampleBeginX = -1;
 			m_iSampleEndX = -1;
 
+			m_iPrimitiveIndex = -1;
+
 			m_status = Status_Idle;
 
 			m_dLeft = MAX_DOUBLE;
@@ -247,13 +224,15 @@ public:
 			m_dBottom = MAX_DOUBLE;
 		}
 
-		SSectionData(const SSectionData &data)
+		SSectionData(const SSectionData& data)
 		{
 			m_bLeftFinishMerge = false;
 			m_bRightFinishMerge = false;
 
 			m_iSampleBeginX = data.m_iSampleBeginX;
 			m_iSampleEndX = data.m_iSampleEndX;
+
+			m_iPrimitiveIndex = -1;
 
 			m_status = Status_Idle;
 
@@ -270,6 +249,8 @@ public:
 
 			m_iSampleBeginX = data1.m_iSampleBeginX;
 			m_iSampleEndX = data2.m_iSampleEndX;
+
+			m_iPrimitiveIndex = -1;
 
 			m_status = Status_Idle;
 
@@ -293,7 +274,8 @@ public:
 			Vertex_handle vh;
 			if (fh->vertex(0)->point().x() > fh->vertex(1)->point().x()) {
 				vh = fh->vertex(0);
-			} else {
+			}
+			else {
 				vh = fh->vertex(1);
 			}
 
@@ -301,8 +283,8 @@ public:
 				vh = fh->vertex(2);
 			}
 
-			if (vertex_lr[1] == Vertex_handle() 
-				|| vertex_lr[1]->point().x() < vh->point().x()) 
+			if (vertex_lr[1] == Vertex_handle()
+				|| vertex_lr[1]->point().x() < vh->point().x())
 			{
 				vertex_lr[1] = vh;
 			}
@@ -313,7 +295,8 @@ public:
 			Vertex_handle vh;
 			if (fh->vertex(0)->point().x() < fh->vertex(1)->point().x()) {
 				vh = fh->vertex(0);
-			} else {
+			}
+			else {
 				vh = fh->vertex(1);
 			}
 
@@ -333,7 +316,7 @@ public:
 			Circulator fcc = section.m_dt.incident_faces(vh);
 			Circulator fcc_end(fcc);
 			do {
-				if (section.m_dt.is_infinite(fcc)){
+				if (section.m_dt.is_infinite(fcc)) {
 					return true;
 				}
 			} while (++fcc != fcc_end);
@@ -346,12 +329,13 @@ public:
 				return Vertex_handle();
 
 			Vertex_handle vh_target = vecVCandidates[0];
-			for (int i = 1; i < vecVCandidates.size(); ++i) 
+			for (int i = 1; i < vecVCandidates.size(); ++i)
 			{
 				CGAL::Orientation ori = CGAL::orientation(vh_base->point(), vh_target->point(), vecVCandidates[i]->point());
 				if (CGAL::RIGHT_TURN == ori) {
 					vh_target = vecVCandidates[i];
-				} else if (CGAL::COLLINEAR == ori) 
+				}
+				else if (CGAL::COLLINEAR == ori)
 				{
 					//如果共线选择最近的那个
 					CGAL::Comparison_result ret = CGAL::compare_distance_to_point(vh_base->point(), vh_target->point(), vecVCandidates[i]->point());
@@ -363,7 +347,7 @@ public:
 			return vh_target;
 		}
 
-		Vertex_handle get_cw_first_vertex(Vertex_handle vh_base, std::vector<Vertex_handle> &vecVCandidates)
+		Vertex_handle get_cw_first_vertex(Vertex_handle vh_base, std::vector<Vertex_handle>& vecVCandidates)
 		{
 			if (vecVCandidates.empty())
 				return Vertex_handle();
@@ -429,7 +413,8 @@ public:
 						VertexIndexsSet.insert(vh_next_border);
 						hvl = vh_next_border;
 						bLeftUpdate = true;
-					} else {
+					}
+					else {
 						bLeftUpdate = false;
 					}
 				}
@@ -458,7 +443,8 @@ public:
 						VertexIndexsSet.insert(vh_next_border);
 						hvr = vh_next_border;
 						bRightUpdate = true;
-					} else {
+					}
+					else {
 						bRightUpdate = false;
 					}
 				}
@@ -507,7 +493,8 @@ public:
 						VertexIndexsSet.insert(vh_next_border);
 						hvl = vh_next_border;
 						bLeftUpdate = true;
-					} else  {
+					}
+					else {
 						bLeftUpdate = false;
 					}
 				}
@@ -536,14 +523,15 @@ public:
 						VertexIndexsSet.insert(vh_next_border);
 						hvr = vh_next_border;
 						bRightUpdate = true;
-					} else {
+					}
+					else {
 						bRightUpdate = false;
 					}
 				}
 			}
 		}
 
-		void boundingBox(double x, double y) 
+		void boundingBox(double x, double y)
 		{
 			if (x < m_dLeft)
 				m_dLeft = x;
@@ -558,19 +546,20 @@ public:
 
 		bool check_circle_intersect(Face_handle handle, Segment_2& seg, Orientation ori)
 		{
-			Point2D &p1 = handle->vertex(0)->point();
-			Point2D &p2 = handle->vertex(1)->point();
-			Point2D &p3 = handle->vertex(2)->point();
+			Point2D& p1 = handle->vertex(0)->point();
+			Point2D& p2 = handle->vertex(1)->point();
+			Point2D& p3 = handle->vertex(2)->point();
 			Circle_2 cir(p1, p2, p3);
 
 			if (CGAL::do_intersect(cir, seg))
 			{
 				if (ori == Near_Left) {
 					m_setRiskHandles_left.insert(handle);
-				} else {
+				}
+				else {
 					m_setRiskHandles_right.insert(handle);
 				}
-				
+
 				m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(handle->vertex(0)->info(), handle->vertex(0)));
 				m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(handle->vertex(1)->info(), handle->vertex(1)));
 				m_vertexHashtable.insert(std::pair<unsigned int, Vertex_handle>(handle->vertex(2)->info(), handle->vertex(2)));
@@ -590,7 +579,7 @@ public:
 			m_facesmap.insert(std::pair<Face, bool>(face, true));
 			return false;
 		}
-		
+
 		Orientation orientation(SSectionData& other)
 		{
 			if (m_iSampleBeginX < 0 || m_iSampleEndX < 0)
@@ -598,11 +587,13 @@ public:
 
 			if (m_iSampleBeginX >= m_iSampleEndX || other.m_iSampleBeginX >= other.m_iSampleEndX)
 				return Not_Near;
-			
+
 			if (m_iSampleBeginX == other.m_iSampleEndX)
 				return Near_Right;
 			if (m_iSampleEndX == other.m_iSampleBeginX)
 				return Near_Left;
+
+			return Not_Near;
 		}
 
 		void insert_delaunay(Face_handle& handle)
@@ -621,19 +612,20 @@ public:
 				for (auto handle : other.m_setRiskHandles_left) {
 					insert_delaunay(handle);
 				}
-			} else {
+			}
+			else {
 				for (auto handle : other.m_setRiskHandles_right) {
 					insert_delaunay(handle);
 				}
 			}
 		}
 
-		void insert_tangent_delaunay(SSectionData& graph1, SSectionData& graph2) 
+		void insert_tangent_delaunay(SSectionData& graph1, SSectionData& graph2)
 		{
 			std::vector<Vertex_handle> vecVHandles;
 			get_up_tangent_vetex(graph1, graph2, vecVHandles);
 			get_bottom_tangent_vetex(graph1, graph2, vecVHandles);
-		
+
 			for (auto& vh : vecVHandles)
 			{
 				auto ittr = m_vertexHashtable.find(vh->info());
@@ -664,7 +656,8 @@ public:
 				auto ittr = m_facesmap.find(face);
 				if (ittr == m_facesmap.end()) {
 					m_facesmap.insert(std::pair<Face, bool>(face, true));
-				} else {
+				}
+				else {
 					ittr->second = true;
 				}
 				return true;
@@ -683,7 +676,7 @@ public:
 			return false;
 		}
 
-		int merge(std::vector<Face_handle> &vecMergeResult, SSectionData& leftSection, SSectionData& rightSection)
+		int merge(std::vector<Face_handle>& vecMergeResult, SSectionData& leftSection, SSectionData& rightSection)
 		{
 			std::vector<Face_handle> vecFaceCandidates;
 			std::vector<unsigned int> vecDuliInfos;
@@ -692,13 +685,13 @@ public:
 			{
 				Face_handle cur_face = m_deqBarrierFaces.front();
 				m_deqBarrierFaces.pop_front();
-			
+
 				//bfs由已确定的面为基础，确定四周3个邻居面
 				for (int i = 0; i < 3; ++i)
 				{
 					Face_handle nfh = cur_face->neighbor(i);
 
-					if (m_dt.is_infinite(nfh->vertex(0)) || m_dt.is_infinite(nfh->vertex(1)) || m_dt.is_infinite(nfh->vertex(2))) 
+					if (m_dt.is_infinite(nfh->vertex(0)) || m_dt.is_infinite(nfh->vertex(1)) || m_dt.is_infinite(nfh->vertex(2)))
 						continue;
 					if (leftSection.m_dt.is_infinite(nfh->vertex(0)) || leftSection.m_dt.is_infinite(nfh->vertex(1)) || leftSection.m_dt.is_infinite(nfh->vertex(2)))
 						continue;
@@ -722,21 +715,23 @@ public:
 					bool bLeft = true;
 					vecFaceCandidates.clear();
 					auto ittr_vertex = leftSection.m_vertexHashtable.find(vi);
-					if (ittr_vertex != leftSection.m_vertexHashtable.end()){
+					if (ittr_vertex != leftSection.m_vertexHashtable.end()) {
 						bLeft = true;
 						get_faces_around_vertex(leftSection, ittr_vertex->second, vecFaceCandidates);
-					} else {
+					}
+					else {
 						auto ittr_vertex = rightSection.m_vertexHashtable.find(vi);
 						if (ittr_vertex != rightSection.m_vertexHashtable.end()) {
 							bLeft = false;
 							get_faces_around_vertex(rightSection, ittr_vertex->second, vecFaceCandidates);
-						} else {
+						}
+						else {
 							continue;
 						}
 					}
 
 					//根据顶点的周围的面，判断哪个才是真正的邻居
-					for (auto &facehandle : vecFaceCandidates)
+					for (auto& facehandle : vecFaceCandidates)
 					{
 						iCount = 0;
 						int other_index = -1;
@@ -744,11 +739,12 @@ public:
 						vecDuliInfos.push_back(facehandle->vertex(0)->info());
 						vecDuliInfos.push_back(facehandle->vertex(1)->info());
 						vecDuliInfos.push_back(facehandle->vertex(2)->info());
-						for (auto& index : vecDuliInfos) 
+						for (auto& index : vecDuliInfos)
 						{
 							if (index == vh1->info() || index == vh2->info()) {
 								++iCount;
-							} else {
+							}
+							else {
 								other_index = index;
 							}
 						}
@@ -766,13 +762,14 @@ public:
 							continue;
 
 						bool bNew = false;
-						if (bLeft){
+						if (bLeft) {
 							auto ittr = leftSection.m_facesmap.find(Face(facehandle->vertex(0)->info(), facehandle->vertex(1)->info(), facehandle->vertex(2)->info()));
 							if (ittr != leftSection.m_facesmap.end() && !ittr->second) {
 								ittr->second = true;
 								bNew = true;
 							}
-						} else {
+						}
+						else {
 							auto ittr = rightSection.m_facesmap.find(Face(facehandle->vertex(0)->info(), facehandle->vertex(1)->info(), facehandle->vertex(2)->info()));
 							if (ittr != rightSection.m_facesmap.end() && !ittr->second) {
 								ittr->second = true;
@@ -793,7 +790,7 @@ public:
 			return vecMergeResult.size();
 		}
 
-		int get_infinite_vertex_index(SSectionData& section, Circulator cc, std::vector<int> &vecIndexs)
+		int get_infinite_vertex_index(SSectionData& section, Circulator cc, std::vector<int>& vecIndexs)
 		{
 			if (section.m_dt.is_infinite(cc->vertex(0)))
 				vecIndexs.push_back(0);
@@ -807,7 +804,7 @@ public:
 			return vecIndexs.size();
 		}
 
-		int get_faces_around_vertex(SSectionData& section, Vertex_handle& vhandle, std::vector<Face_handle> &vecFaceCandidates)
+		int get_faces_around_vertex(SSectionData& section, Vertex_handle& vhandle, std::vector<Face_handle>& vecFaceCandidates)
 		{
 			TDS& tds = section.m_dt.tds();
 			Circulator cc = tds.incident_faces(vhandle);
@@ -815,7 +812,7 @@ public:
 			Face_handle fh;
 
 			std::vector<int> infiniteIndexs;
-			do{
+			do {
 				if (get_infinite_vertex_index(section, cc, infiniteIndexs) > 0)
 					continue;
 
@@ -828,6 +825,39 @@ public:
 			return vecFaceCandidates.size();
 		}
 	};
+	/*
+	typedef CGAL::Projection_traits_xy_3<K>  Gt;
+	typedef CGAL::Delaunay_triangulation_2<Gt> Delaunay;
+	typedef K::Point_3   Point;
+	typedef Delaunay::Finite_face_handles Face_handles;
+	typedef Delaunay::Face_handle face_handle;
+	typedef Delaunay::Vertex_handle Vertex_handle;
+
+	typedef Delaunay::Finite_face_handles Face_handles;
+	typedef Delaunay::Face_handle face_handle;
+	typedef Delaunay::Vertex_handle Vertex_handle;*/
+
+	Delaunay_Mutithread_CGAL();
+
+	~Delaunay_Mutithread_CGAL();
+
+	void read_data();
+
+	void Delaunay_Mutithread_CGAL::readInputFromFile(const std::string& fileName);
+
+	int getRegularTeatExmapleData(int iVertexNums, float fRatio);
+
+	osg::ref_ptr<osg::Geometry> createGeometry();
+
+	void delaunay();
+
+	int getThreadNum(size_t size);
+
+	void delaunay(osg::Vec3Array::iterator begin, osg::Vec3Array::iterator end);
+
+	void saveFaceIndexs(Face_handle fh, int iPrimitiveIndex);
+
+	void log(SSectionData& sectionData1, SSectionData& sectionData2, const CString& strFun);
 
 	struct merging_task : public task
 	{
@@ -870,7 +900,7 @@ private:
 	CThreadPool *m_pThreadPool;
 
 	osg::ref_ptr<osg::Vec3Array> m_vecPointsRef;
-	osg::ref_ptr<osg::DrawElementsUInt> m_PrimitveSetRef;
+	std::vector<osg::ref_ptr<osg::DrawElementsUInt>> m_vecPrimitiveRefs;	//按每个线程单独区分，避免加锁的性能开销（或者使用线程池进行处理？）
 
 	std::vector<task*> m_vecTasks;
 	std::vector<SSectionData> m_vecSectionData;  //
