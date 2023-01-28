@@ -4,6 +4,8 @@
 #include <deque>
 #include <mutex>
 
+#include "../pch.h"
+
 struct task
 {
 	enum EPriority 
@@ -31,7 +33,7 @@ public:
 			m_iThreadNum = iMaxThread;
 	}
 
-	~CThreadPool() 
+	~CThreadPool()
 	{
 		m_bDone = true;
 	}
@@ -70,6 +72,13 @@ public:
 		}
 	}
 
+	void detach() 
+	{
+		for (auto& td : m_vecThreads) {
+			td.detach();
+		}
+	}
+
 	void setThreadNum(int iThreamNum) 
 	{
 		m_iThreadNum = iThreamNum;
@@ -93,7 +102,11 @@ protected:
 
 	bool popTask(task **pTask)
 	{
+		if (m_qTasks.empty())
+			return false;
+
 		std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 		if (m_qTasks.empty())
 			return false;
 
@@ -122,4 +135,68 @@ private:
 	int m_iThreadNum;
 	std::recursive_mutex m_mutex;
 	bool m_bDone;
+};
+
+class CLog
+{
+public:
+	static CLog& getInstance()
+	{
+		static CLog log;
+		return log;
+	}
+
+	~CLog()
+	{
+		for (int i = 0; i < m_vecTasks.size(); ++i)
+		{
+			delete m_vecTasks[i];
+			m_vecTasks[i] = nullptr;
+		}
+		ofs.close();
+	}
+
+	void LOG(const CString& strInfo)
+	{
+		task* pTask = new LogTask(strInfo);
+		m_vecTasks.push_back(pTask);
+		m_ThreadPool.addTask(pTask);
+	}
+
+	bool Logout(const CString& strInfo)
+	{
+		if (!ofs.is_open())
+			return false;
+
+		ofs << (LPCTSTR)strInfo << (LPCTSTR)(_T("\n"));
+	}
+
+	struct LogTask : public task
+	{
+		LogTask(const CString& strInfo = _T(""))
+		{
+			m_strInfo = strInfo;
+		}
+
+		void operator()() override
+		{
+			CLog::getInstance().Logout(m_strInfo);
+		}
+
+		CString m_strInfo;
+	};
+
+private:
+	CLog() : m_filepath(_T("D:\\log.txt"))	//先写死了
+	{
+		ofs.open(m_filepath);
+		m_ThreadPool.setThreadNum(1);
+		m_ThreadPool.start();
+		m_ThreadPool.detach();
+	}
+
+	CString m_filepath;
+	std::wofstream ofs;
+	CThreadPool m_ThreadPool;	//还是用的轮询，效率比较低，后面再看看，先用来排查bug
+	std::vector<task*> m_vecTasks;
 };

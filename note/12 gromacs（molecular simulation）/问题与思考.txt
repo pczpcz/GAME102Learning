@@ -1,0 +1,17 @@
+1. For the recent version of GROMACS (GROMACS 2021.2, released May 5th, 2021), when you try to build the GROMACS with CUDA environment, libgromacs may not build properly, showing this error. It reads as (or like)
+
+http://cdlc.cau.ac.kr/Gromacs/966
+
+nvcc fatal: Unknown option -std:c++17
+
+To fix this, follow this method:
+
+1) Open the file gmxManageNvccConfig.cmake in gromacs-2021.2\cmake
+
+2) Find the CMAKE_CXX17_STANDARD_COMPILE_OPTION (it locates 175th line)
+
+3) Replace CXX as CUDA: CMAKE_CUDA17_STANDARD_COMPILE_OPTION
+
+4) Optional: You can change other CXX14 or CXX17 as CUDA14 or CUDA17, respectively.
+
+5) Save, and reconfigure using cmake GUI program.
