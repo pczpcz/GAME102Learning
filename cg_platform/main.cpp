@@ -24,6 +24,8 @@
 #undef min
 #include "1_Delauney/Delaunay_Mutithread.h"
 
+#include "USRefl_99.h"
+
 class ImGuiInitOperation : public osg::Operation
 {
 public:

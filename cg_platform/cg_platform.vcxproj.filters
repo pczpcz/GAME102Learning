@@ -98,5 +98,11 @@
     <ClInclude Include="1_Delauney\ThreadPool.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="1_Delauney\predicates.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="USRefl\include\USRefl_99.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
