@@ -7,6 +7,7 @@
 #include <deque>
 #include <iterator>
 #include <algorithm>
+#include <random>
 
 #include <CGAL/Segment_2.h>
 #include <CGAL/Circle_2.h>
@@ -51,13 +52,15 @@
 //不同的分区数量划分，可能导致最终结果的三角形数有略微的差异，几十个？可能原因是由于不同的分区
 //划分影响到了分区的上下切线的识别，主要影响外围边界的三角形，对内部无影响（也有可能是其他原因，还在确认排查）
 
-//-----------------------------version_20230223-----------------------------------------------------------------------------
-//1. 简化代码（3000行-->1600行），去掉了对dela算法的不必要封装（之前做封装主要是为了可以方便接入其他的三角化算法）
+//-----------------------------version_20230301-----------------------------------------------------------------------------
+//1. 简化代码（3000行-->1800行），去掉了对dela算法的不必要封装（之前做封装主要是为了可以方便接入其他的三角化算法）
 //2. 删除了上下切线的查找逻辑（用三角网格的所有边界点代替）
 //3. 修改多线程逻辑（删除了线程池），优化了内存使用和释放（尽量使用已有的预分配连续内存vector或者dela内部已有的内存，去掉了map/set成员变量，在必要时通过局部变量使用），减少数据拷贝操作（在主流程直接调用dela算法接口并将数据索引传递给接口，而不是把数据拷贝传给dela封装类需要时再调用接口）
 //4. 增加上下左右四个合并方向（之前只有左右两个方向）的功能
-//5. 增加限制多边形区域进行三角划分的功能(只支持一个外轮廓，支持多个内轮廓)
+//5. 增加限制多边形区域进行三角划分的功能(只支持一个外轮廓，支持多个内轮廓--内轮廓接口功能已实现，但是界面没有内轮廓识别功能，所以还未接入该功能)
 //6. 删除了预采样负载均衡功能，直接根据总区域范围按面积平均划分分区（分区划分：1x3、3x3，5x4,.......，nxm）
+//7. 针对JN_3.las点云418W分区（其他两个分区468W、1200W）dela中的split算法效率低的问题，参考CDT对数据进行随机化处理
+//8. 增加三角形顶点及索引数据的分区提取功能
 
 //可能存在的问题：
 // 1. 还是存在一些重复面
@@ -68,16 +71,20 @@
 //	如果使用方法二，效率不会比现有三角化更快，只会更慢，慢多少要看采用的方法
 //	单从效率考虑，方法一更好（看后面实际需求再实现）
 
-//性能测试结果：
-//(1) 3线程（781W数据点，限制区域功能：不开启）：							用时15s左右
-//(2) 3线程（781W数据点，限制区域功能： 开启（0.7， 0.7， 0.3， 0.3））：	用时10s左右
+//点云性能测试结果：
+//（1）JN_3.las(2100W-单线程-限制区域未开启)：用时240s
+//（2）JN_3.las(2100W-3线程-限制区域未开启)： 用时60s
+//（3）grounds.las(2500W-3线程-限制区域未开启)： 用时90s
+//（4）grounds.las(2500W-单线程-限制区域未开启)： 用时195s
+//结论：效率提升2-4倍，由于对分区数据进行随机化处理，同时线程的负载可能不均衡，所以不同的数据集提升幅度有差异
+
+//关于限制区域功能：
 //限制区域屏蔽掉了部分点，使得后续分区参与三角化的点变少，三角化速度可能提升；
 //但也和限制区域和线程的负载均衡有关系，有些线程点数大量减少，而有些线程点数可能基本不变，merge操作是在线程join之后调用，所以也有可能不提升，限制区域屏蔽逻辑也有一定开销，不排除效率降低的可能
 //另一个问题：限制区域有可能导致某个线程的点数<3, 此时会将这部分点加入到merge中
 
 //关于分区逻辑：
-//1. 如果某列的有三个分区，该列的某个分区数量小于100000，则会合并到该列的其他分区里面（往底部分区方向合并），暂不支持水平分区的合并
-//2. 根据当前可用线程数，和点云的长宽比，自动计算分区排布
+//1. 根据当前可用线程数，和点云的长宽比，自动计算分区排布
 
 //--------------------------------------------------------------------------------------------
 
@@ -463,6 +470,14 @@ struct DMContainer
 	{
 		Block() 
 		{
+			m_iRow = -1;
+			m_iCol = -1;
+
+			unsigned int m_ib_raw = MAX_UINT;
+			unsigned int m_ie_raw = MAX_UINT;
+			unsigned int m_ib = MAX_UINT;
+			unsigned int m_ie = MAX_UINT;
+
 			m_dt = nullptr;
 
 			nei[0] = true;
@@ -482,10 +497,19 @@ struct DMContainer
 			return m_ie - m_ib;
 		}
 
+		size_t raw_size()
+		{
+			return m_ie_raw - m_ib_raw;
+		}
+
 		int m_iRow;
 		int m_iCol;
-		unsigned int m_ib;
-		unsigned int m_ie;
+
+		unsigned int m_ib_raw;		//执行限制区域前的初始分区
+		unsigned int m_ie_raw;		//执行限制区域前的初始分区
+
+		unsigned int m_ib;			//执行限制区域后的初始分区
+		unsigned int m_ie;			//执行限制区域后的初始分区
 
 		bool nei[4];
 		double limits[4];
@@ -501,9 +525,9 @@ struct DMContainer
 
 	int insert(std::vector<Point_2> &vecPoints) 
 	{
-		m_dMaxX = MIN_DOUBLE;
+		m_dMaxX =  (-1) * MAX_DOUBLE;
 		m_dMinX = MAX_DOUBLE;
-		m_dMaxY = MIN_DOUBLE;
+		m_dMaxY = (-1) *MAX_DOUBLE;
 		m_dMinY = MAX_DOUBLE;
 
 		m_vecPoints.swap(vecPoints);
@@ -566,12 +590,11 @@ struct DMContainer
 		}
 
 		std::vector<std::pair<unsigned int, unsigned int>> vecPartsY;
-		for (int i = 0; i < vecPartsX.size(); ++i) {
-			if (!dy) break;
-
-			ibegin = vecPartsX[i].first;
-			iend = vecPartsX[i].second;
+		if (vecPartsX.empty()) 
+		{
 			for (int j = 0; j < ny; ++j) {
+				if (!dy) break;
+
 				auto ittrY = std::partition(m_vecPoints.begin() + ibegin, m_vecPoints.begin() + iend, CompareY(*(double*)((char*)dy + j * offset)));
 				unsigned int sub_ib = ibegin;
 				unsigned int sub_im = std::distance(m_vecPoints.begin(), ittrY);
@@ -582,6 +605,27 @@ struct DMContainer
 				}
 				ibegin = sub_im;
 				iend = sub_ie;
+			}
+		}
+		else 
+		{
+			for (int i = 0; i < vecPartsX.size(); ++i) {
+				if (!dy) break;
+
+				ibegin = vecPartsX[i].first;
+				iend = vecPartsX[i].second;
+				for (int j = 0; j < ny; ++j) {
+					auto ittrY = std::partition(m_vecPoints.begin() + ibegin, m_vecPoints.begin() + iend, CompareY(*(double*)((char*)dy + j * offset)));
+					unsigned int sub_ib = ibegin;
+					unsigned int sub_im = std::distance(m_vecPoints.begin(), ittrY);
+					unsigned int sub_ie = iend;
+					vecPartsY.push_back(std::pair<unsigned int, unsigned int>(sub_ib, sub_im));
+					if (j == ny - 1) {
+						vecPartsY.push_back(std::pair<unsigned int, unsigned int>(sub_im, sub_ie));
+					}
+					ibegin = sub_im;
+					iend = sub_ie;
+				}
 			}
 		}
 
@@ -651,7 +695,30 @@ struct DMContainer
 			return false;
 		}
 
+		for (int iCol = 0; iCol < m_iCols; ++iCol) {
+			for (int iRow = 0; iRow < m_iRows; ++iRow) {
+				int iBlock = iRow + iCol * m_iRows;
+				Block newBlock;
+				newBlock.m_ib_raw = vecBlocks[iBlock].first;
+				newBlock.m_ie_raw = vecBlocks[iBlock].second;
+				newBlock.m_ib = vecBlocks[iBlock].first;
+				newBlock.m_ie = vecBlocks[iBlock].second;
+				get_limit(iRow, iCol, newBlock.limits);
+
+				if (iCol == 0)
+					newBlock.nei[2] = false;
+				if (iCol == m_iCols - 1)
+					newBlock.nei[3] = false;
+				if (iRow == 0)
+					newBlock.nei[1] = false;
+				if (iRow == m_iRows - 1)
+					newBlock.nei[0] = false;
+				m_vecBlocks.push_back(newBlock);
+			}
+		}
+
 		//处理空分区和合并点数太少的分区
+		/*
 		for (int iCol = 0; iCol < m_iCols; ++iCol) {
 			for (int iRow = 0; iRow < m_iRows; ++iRow) {
 				int iBlock = iRow + iCol * m_iRows;
@@ -697,7 +764,7 @@ struct DMContainer
 					}
 				}
 			}
-		}
+		}*/
 
 		m_vecvecIndexs.resize(m_vecBlocks.size());
 
@@ -728,6 +795,11 @@ struct DMContainer
 	void saveIndex(int iBlockIndex, unsigned int index)
 	{
 		m_vecvecIndexs[iBlockIndex].push_back(index);
+	}
+
+	void saveMergeIndex(unsigned int index) 
+	{
+		m_vecMergeTriIndexs.push_back(index);
 	}
 
 	void reserve(int num)
@@ -781,7 +853,27 @@ struct DMContainer
 		return false;
 	}
 
-	bool do_intersect(Segment_2 seg1, Segment_2 seg2) 
+#define eps 1.0e-6
+	bool do_intersect(const Segment_2 &l1, const Segment_2 &l2)
+	{
+		//快速排斥实验
+		if ((l1.x1 > l1.x2 ? l1.x1 : l1.x2) < (l2.x1 < l2.x2 ? l2.x1 : l2.x2) ||
+			(l1.y1 > l1.y2 ? l1.y1 : l1.y2) < (l2.y1 < l2.y2 ? l2.y1 : l2.y2) ||
+			(l2.x1 > l2.x2 ? l2.x1 : l2.x2) < (l1.x1 < l1.x2 ? l1.x1 : l1.x2) ||
+			(l2.y1 > l2.y2 ? l2.y1 : l2.y2) < (l1.y1 < l1.y2 ? l1.y1 : l1.y2)   )
+		{
+			return false;
+		}
+		//跨立实验
+		if (   (((l1.x1 - l2.x1)*(l2.y2 - l2.y1) - (l1.y1 - l2.y1)*(l2.x2 - l2.x1))* ((l1.x2 - l2.x1)*(l2.y2 - l2.y1) - (l1.y2 - l2.y1)*(l2.x2 - l2.x1))) > eps
+			|| (((l2.x1 - l1.x1)*(l1.y2 - l1.y1) - (l2.y1 - l1.y1)*(l1.x2 - l1.x1))* ((l2.x2 - l1.x1)*(l1.y2 - l1.y1) - (l2.y2 - l1.y1)*(l1.x2 - l1.x1))) > eps )
+		{
+			return false;
+		}
+		return true;
+	}
+
+	bool do_intersect_cgal(Segment_2 seg1, Segment_2 seg2) 
 	{
 		typedef CGAL::Segment_2<K>	CGSegment_2;
 		typedef K::Point_2			CGPoint_2;
@@ -789,66 +881,26 @@ struct DMContainer
 		CGSegment_2 segment1(CGPoint_2(seg1.x1, seg1.y1), CGPoint_2(seg1.x2, seg1.y2));
 		CGSegment_2 segment2(CGPoint_2(seg2.x1, seg2.y1), CGPoint_2(seg2.x2, seg2.y2));
 
-		if (CGAL::do_intersect(segment1, segment2))
-		{
-			return true;
-		}
-		return false;
+		return CGAL::do_intersect(segment1, segment2);
 	}
 
-	int getOutlineSegs(std::vector<Segment_2> &vecSegs) 
+	int getOutlineSegs(Polygon_2 &polygon, std::vector<Segment_2> &vecSegs)
 	{
-		for (int i = 0; i < m_polyOutLines.size(); ++i)
-		{
-			int size = m_polyOutLines[i].m_vecPoints.size();
-			if (size <= 2)
-				continue;
-			for (int j = size - 1; j >= 1 ; --j) {
-				int k = j - 1;
-				Segment_2 seg_ccw(m_polyOutLines[i].m_vecPoints[j], m_polyOutLines[i].m_vecPoints[k]);
-				vecSegs.push_back(seg_ccw);
-			}
-			Segment_2 seg_ccw(m_polyOutLines[i].m_vecPoints[0], m_polyOutLines[i].m_vecPoints[size-1]);
-			vecSegs.push_back(seg_ccw);
+		int size = polygon.m_vecPoints.size();
+		if (size <= 2)
+			return vecSegs.size();
+		for (int j = 0; j < size - 1; ++j) {
+			int k = j + 1;
+			Segment_2 seg(polygon.m_vecPoints[j], polygon.m_vecPoints[k]);
+			vecSegs.push_back(seg);
 		}
-		return vecSegs.size();
-	}
-
-	int getHoleSegs(std::vector<Segment_2> &vecSegs) 
-	{
-		for (int i = 0; i < m_polyHoles.size(); ++i)
-		{
-			int size = m_polyHoles[i].m_vecPoints.size();
-			if (size <= 2)
-				continue;
-			for (int j = size - 1; j >= 1; --j) {
-				int k = j - 1;
-				Segment_2 seg_ccw(m_polyHoles[i].m_vecPoints[j], m_polyHoles[i].m_vecPoints[k]);
-				vecSegs.push_back(seg_ccw);
-			}
-			Segment_2 seg_ccw(m_polyHoles[i].m_vecPoints[0], m_polyHoles[i].m_vecPoints[size - 1]);
-			vecSegs.push_back(seg_ccw);
-		}
-		/*
-		for (int i = 0; i < m_polyHoles.size(); ++i)
-		{
-			int size = m_polyHoles[i].m_vecPoints.size();
-			if (size <= 2)
-				continue;
-			for (int j = 0; j < size - 1; ++j) {
-				int k = j + 1;
-				Segment_2 seg_cw(m_polyHoles[i].m_vecPoints[j], m_polyHoles[i].m_vecPoints[k]);
-				vecSegs.push_back(seg_cw);
-			}
-			Segment_2 seg_cw(m_polyHoles[i].m_vecPoints[size - 1], m_polyHoles[i].m_vecPoints[0]);
-			vecSegs.push_back(seg_cw);
-		}
-		*/
+		Segment_2 seg(polygon.m_vecPoints[size - 1], polygon.m_vecPoints[0]);
+		vecSegs.push_back(seg);
 		return vecSegs.size();
 	}
 
 	//(==0， >0,  <0)  ---> (相交,  内部,  外部)
-	int do_quad_intersect(double x1, double y1, double x2, double y2, std::vector<Segment_2> &vecSegs)
+	int do_quad_intersect(double x1, double y1, double x2, double y2, std::vector<Segment_2> &vecSegs, Polygon_2 &polygon)
 	{
 		if (vecSegs.empty())
 			return 1;
@@ -874,39 +926,38 @@ struct DMContainer
 				return 0;
 		}
 
-		//不相交：仍有几种情况，分区在轮廓外、分区在轮廓内、 分区和轮廓重叠、分区包含了轮廓，
+		//不相交, 仍有几种情况: 分区在轮廓外、分区在轮廓内、 分区和轮廓重叠、分区包含了轮廓，
 		//但是由于特殊的划分使包含的情况不成立，所以不考虑这种情况
-		for (auto& seg : vecSegs)
-		{
-			if (false == do_quad_point_inside(x1, y1, vecSegs))
-			{
-				return -1;
-			}
-		}
+		if (false == do_quad_point_inside(x1, y1, polygon))
+			return -1;
+		if (false == do_quad_point_inside(x1, y2, polygon))
+			return -1;
+		if (false == do_quad_point_inside(x2, y1, polygon))
+			return -1;
+		if (false == do_quad_point_inside(x2, y2, polygon))
+			return -1;
 
-		return 1;
+		return 1;		//分区四个点都在轮廓上且不相交--》在轮廓内部
 	}
 
-	bool do_quad_point_inside(double x, double y, std::vector<Segment_2> &vecSegs)
+	bool do_quad_point_inside(double x, double y, Polygon_2& poly)
 	{
-		for (auto &seg : vecSegs)
-		{
-			//int ori = predicates::adaptive::orient2d(seg.x1, seg.y1, seg.x2, seg.y2, x, y);
-			//if (ori <= 0)
-				//return false;
-
-			typedef K::Point_2			CGPoint_2;
-			CGPoint_2 p1(seg.x1, seg.y1);
-			CGPoint_2 p2(seg.x2, seg.y2);
-			CGPoint_2 p(x, y);
-
-			if (CGAL::RIGHT_TURN == CGAL::orientation(p1, p2, p)) 
-			{
-				return false;
+		//射线法：  (点数太多，效率？？)
+		// ref1： https://wrfranklin.org/Research/Short_Notes/pnpoly.html
+		// ref2： https://erich.realtimerendering.com/ptinpoly/
+		auto pnpoly = [&](float testx, float testy)->bool {
+			int i, j, c = 0;
+			std::vector<Point_2> &vecPoints = poly.m_vecPoints;
+			int nvert = vecPoints.size();
+			for (i = 0, j = nvert - 1; i < nvert; j = i++) {
+				if (((vecPoints[i].y > testy) != (vecPoints[j].y > testy)) &&
+					(testx < (vecPoints[j].x - vecPoints[i].x) * (testy - vecPoints[i].y) / (vecPoints[j].y - vecPoints[i].y) + vecPoints[i].x)) {
+					c = !c;
+				}
 			}
-		}
-
-		return true;
+			return c;
+		};
+		return pnpoly(x, y);
 	}
 
 	bool get_limit(int iRow, int iCol, double *pLimit) 
@@ -954,6 +1005,19 @@ struct DMContainer
 		if (m_vecPoints.empty())
 			return false;
 
+		//JN_3.las点云418W分区（其他两个分区468W、1200W）dela中的split算法效率低的问题，参考CDT对数据进行随机化处理
+		static std::mt19937 randGenerator(9001);
+		auto random_shuffle = [&](unsigned int ib, unsigned int ie)
+		{
+			if (ib >= ie) return;
+			unsigned int n = ie - ib;
+			for (unsigned int i = n; i >= 1; --i)
+			{
+				std::swap(m_vecPoints[ib + i - 1], m_vecPoints[ib + randGenerator() % (i)]);
+			}
+		};
+		random_shuffle(block.m_ib, block.m_ie);
+
 		//处理限制区域，调用partition
 		struct SQuadrans
 		{
@@ -968,42 +1032,50 @@ struct DMContainer
 		typedef std::vector<std::pair<unsigned int, unsigned int>> VecBlockRange;
 		std::deque<SQuadrans> deQuads;
 
-		std::vector<Segment_2> vecOutlineSegs;
-		std::vector<Segment_2> vecHoleSegs;
 		std::vector<unsigned int> vecMaskIndexs;
-		getOutlineSegs(vecOutlineSegs);
-		getHoleSegs(vecHoleSegs);   //??
-
 		//从轮廓的外围矩形的中心开始划分，避免出现分区包含整个轮廓的情况
-		auto quad_div = [&](SQuadrans& quad, std::vector<Segment_2>& vecSegs, int OutlineType)
+		auto quad_div = [&](SQuadrans& quad, std::vector<Segment_2> &vecSegs, Polygon_2 &polygon, int OutlineType)
 		{
+			vecMaskIndexs.clear();
 			if (quad.ib >= quad.ie)
 				return false;
 
+			if (vecSegs.empty() || vecSegs.size() <= 2)
+				return false;
+
 			double rectMinx = MAX_DOUBLE;
-			double rectMaxx = MIN_DOUBLE;
+			double rectMaxx = (-1) * MAX_DOUBLE;
 			double rectMiny = MAX_DOUBLE;
-			double rectMaxy = MIN_DOUBLE;
+			double rectMaxy = (-1) * MAX_DOUBLE;
 
 			for (auto& seg : vecSegs) 
 			{
 				if (seg.x1 < rectMinx)
 					rectMinx = seg.x1;
 				if (seg.x2 < rectMinx)
-					rectMinx = seg.x1;
+					rectMinx = seg.x2;
 				if (seg.x2 > rectMaxx)
-					rectMaxx = seg.x1;
+					rectMaxx = seg.x2;
 				if (seg.x1 > rectMaxx)
 					rectMaxx = seg.x1;
-				if (seg.y1 < rectMinx)
-					rectMiny = seg.x1;
-				if (seg.y2 < rectMinx)
-					rectMiny = seg.x1;
-				if (seg.y2 < rectMinx)
-					rectMaxy = seg.x1;
-				if (seg.y1 < rectMinx)
-					rectMaxy = seg.x1;
+				if (seg.y1 < rectMiny)
+					rectMiny = seg.y1;
+				if (seg.y2 < rectMiny)
+					rectMiny = seg.y2;
+				if (seg.y2 > rectMaxy)
+					rectMaxy = seg.y2;
+				if (seg.y1 > rectMaxy)
+					rectMaxy = seg.y1;
 			}
+
+			if (rectMinx < quad.x1)
+				quad.x1 = rectMinx;
+			if (rectMaxx > quad.x2)
+				quad.x2 = rectMaxx;
+			if (rectMiny < quad.y1)
+				quad.y1 = rectMiny;
+			if (rectMaxy > quad.y2)
+				quad.y2 = rectMaxy;
 
 			VecBlockRange vecBR;
 			double sepx = (rectMinx + rectMaxx) / 2;
@@ -1061,20 +1133,21 @@ struct DMContainer
 			{
 				quad = deQuads.front();
 				deQuads.pop_front();
-				int retPos = do_quad_intersect(quad.x1, quad.y1, quad.x2, quad.y2, vecSegs);
+				int retPos = do_quad_intersect(quad.x1, quad.y1, quad.x2, quad.y2, vecSegs, polygon);
 				if (retPos == 0) {	//相交
 					if ((quad.ie - quad.ib) <= (unsigned int)10) {
 						for (unsigned int ui = quad.ib; ui < quad.ie; ++ui) {
-							if (false == do_quad_point_inside(m_vecPoints[ui].x, m_vecPoints[ui].y, vecOutlineSegs)) {
-								if (OutlineType == 0)
+							if (false == do_quad_point_inside(m_vecPoints[ui].x, m_vecPoints[ui].y, polygon)) {
+								if (OutlineType == 0) {
 									vecMaskIndexs.push_back(ui);	//目前只支持一个外轮廓，一个以上的话就不行了
+								}
 							} else {
-								if (OutlineType == 1)
+								if (OutlineType == 1) {
 									vecMaskIndexs.push_back(ui);
+								}
 							}
 						}
-					}
-					else {
+					} else {
 						VecBlockRange vecBR;
 						double sepx = (quad.x1 + quad.x2) / 2;
 						double sepy = (quad.y1 + quad.y2) / 2;
@@ -1144,12 +1217,14 @@ struct DMContainer
 				}
 			}//while (!deQuads.empty()) end
 
+			//将被屏蔽的点移动到分区最后
+			std::sort(vecMaskIndexs.begin(), vecMaskIndexs.end());
 			unsigned int iBack = block.m_ie - 1;
 			if (!vecMaskIndexs.empty())
 			{
-				for (int i = vecMaskIndexs.size() - 1; i >= 0; i--)
+				for (int i = vecMaskIndexs.size(); i >= 1; i--)
 				{
-					unsigned int iMask = vecMaskIndexs[i];
+					unsigned int iMask = vecMaskIndexs[i - 1];
 					if (iBack > iMask) {
 						std::swap(m_vecPoints[iMask], m_vecPoints[iBack]);
 					}
@@ -1157,29 +1232,39 @@ struct DMContainer
 					iBack--;
 				}
 			}
-			vecMaskIndexs.clear();
 			return true;
 		};// quad_div definition end
 		
 		//只支持一个外轮廓
-		SQuadrans quadOutline;
-		quadOutline.ib = block.m_ie;
-		quadOutline.ie = block.m_ib;
-		quadOutline.x1 = block.limits[2];
-		quadOutline.x2 = block.limits[3];
-		quadOutline.y1 = block.limits[1];
-		quadOutline.y2 = block.limits[0];
-		quad_div(quadOutline, vecOutlineSegs, 0);
+		if (!m_polyOutLines.empty())
+		{
+			Polygon_2 &polygon = m_polyOutLines[0];
+			SQuadrans quadOutline;
+			quadOutline.ib = block.m_ib;
+			quadOutline.ie = block.m_ie;
+			quadOutline.x1 = block.limits[2];
+			quadOutline.x2 = block.limits[3];
+			quadOutline.y1 = block.limits[1];
+			quadOutline.y2 = block.limits[0];
+			std::vector<Segment_2> vecSegs;
+			getOutlineSegs(polygon, vecSegs);
+			quad_div(quadOutline, vecSegs, polygon, 0);
+		}
 
-		//todo: 多个内轮廓
-		SQuadrans quadHole;
-		quadHole.ib = block.m_ib;
-		quadHole.ie = block.m_ie;
-		quadHole.x1 = block.limits[2];
-		quadHole.x2 = block.limits[3];
-		quadHole.y1 = block.limits[1];
-		quadHole.y2 = block.limits[0];
-		quad_div(quadHole, vecHoleSegs, 1);
+		//多个内轮廓
+		for (auto &polygon : m_polyHoles)
+		{
+			SQuadrans quadOutline;
+			quadOutline.ib = block.m_ib;
+			quadOutline.ie = block.m_ie;
+			quadOutline.x1 = block.limits[2];
+			quadOutline.x2 = block.limits[3];
+			quadOutline.y1 = block.limits[1];
+			quadOutline.y2 = block.limits[0];
+			std::vector<Segment_2> vecSegs;
+			getOutlineSegs(polygon, vecSegs);
+			quad_div(quadOutline, vecSegs, polygon, 1);
+		}
 
 		if (block.size() <= 2)
 			return true; //这部分点要加入到merge中，见merge
@@ -1187,6 +1272,28 @@ struct DMContainer
 		int iRet = block.m_dt->Triangulate(block.size(), &m_vecPoints[block.m_ib].x, &m_vecPoints[block.m_ib].y, sizeof(Point_2));
 		if (iRet <= 0)
 			return false;
+
+		//单线程
+		if (m_vecBlocks.size() == 1) 
+		{
+			size_t size = block.m_dt->GetNumPolygons();
+			if (size <= 0)
+				return false;
+			Face_handle fh = static_cast<Face_handle>(const_cast<IDelaBella2<double, int>::Simplex*>(block.m_dt->GetFirstDelaunaySimplex()));
+			for (int i = 0; i < size && fh; ++i) 
+			{
+				unsigned int p1 = block.m_ib + fh->vertex(0)->i;
+				unsigned int p2 = block.m_ib + fh->vertex(1)->i;
+				unsigned int p3 = block.m_ib + fh->vertex(2)->i;
+
+				saveIndex(iBlockIndex, p1);
+				saveIndex(iBlockIndex, p2);
+				saveIndex(iBlockIndex, p3);
+
+				fh = (Face_handle)fh->next;
+			}
+			return true;
+		}
 
 		//识别风险面
 		size_t size = block.m_dt->GetNumPolygons();
@@ -1214,6 +1321,27 @@ struct DMContainer
 				saveIndex(iBlockIndex, p1);
 				saveIndex(iBlockIndex, p2);
 				saveIndex(iBlockIndex, p3);
+
+				if ((abs(m_vecPoints[p1].x - 1236.929658) < 10e-4 && abs(m_vecPoints[p1].y - 4316.058791) < 10e-4)
+					|| (abs(m_vecPoints[p1].x - 1158.188142) < 10e-4 && abs(m_vecPoints[p1].y - 4268.846663) < 10e-4)
+					|| (abs(m_vecPoints[p1].x - 1167.637176) < 10e-4 && abs(m_vecPoints[p1].y - 4391.598187) < 10e-4))
+				{
+					int a = 0;
+				}
+
+				if ((abs(m_vecPoints[p2].x - 1236.929658) < 10e-4 && abs(m_vecPoints[p2].y - 4316.058791) < 10e-4)
+					|| (abs(m_vecPoints[p2].x - 1158.188142) < 10e-4 && abs(m_vecPoints[p2].y - 4268.846663) < 10e-4)
+					|| (abs(m_vecPoints[p2].x - 1167.637176) < 10e-4 && abs(m_vecPoints[p2].y - 4391.598187) < 10e-4))
+				{
+					int a = 0;
+				}
+
+				if ((abs(m_vecPoints[p3].x - 1236.929658) < 10e-4 && abs(m_vecPoints[p3].y - 4316.058791) < 10e-4)
+					|| (abs(m_vecPoints[p3].x - 1158.188142) < 10e-4 && abs(m_vecPoints[p3].y - 4268.846663) < 10e-4)
+					|| (abs(m_vecPoints[p3].x - 1167.637176) < 10e-4 && abs(m_vecPoints[p3].y - 4391.598187) < 10e-4))
+				{
+					int a = 0;
+				}
 			}
 			fh = fh_tmp;
 		}
@@ -1243,6 +1371,7 @@ struct DMContainer
 		Dela *delaTmp = Dela::Create();
 		std::vector<Point_2> vecPointsTmp;
 		std::map<Face, bool> facesmap;
+
 		for (int iBlock = 0; iBlock < m_vecBlocks.size(); ++iBlock)
 		{
 			Block &block = m_vecBlocks[iBlock];
@@ -1251,7 +1380,9 @@ struct DMContainer
 			{
 				unsigned int i = block.m_ib;
 				while (i < block.m_ie) {
-					vecPointsTmp.push_back(m_vecPoints[i]);
+					Point_2 p(m_vecPoints[i].x, m_vecPoints[i].y, i);
+					vecPointsTmp.push_back(p);
+					m_vecMergeVertexIndexs.push_back(std::pair<unsigned int, int>(i, iBlock));
 					i++;
 				}
 			}
@@ -1277,6 +1408,9 @@ struct DMContainer
 				vecPointsTmp.push_back(p1);
 				vecPointsTmp.push_back(p2);
 				vecPointsTmp.push_back(p3);
+				m_vecMergeVertexIndexs.push_back(std::pair<unsigned int, int>(pi1, iBlock));
+				m_vecMergeVertexIndexs.push_back(std::pair<unsigned int, int>(pi2, iBlock));
+				m_vecMergeVertexIndexs.push_back(std::pair<unsigned int, int>(pi3, iBlock));
 				fh = (Face_handle)fh->next;
 			}
 
@@ -1286,6 +1420,7 @@ struct DMContainer
 				unsigned int pi = block.m_ib + vh->i;
 				Point_2 p(vh, pi);
 				vecPointsTmp.push_back(p);
+				m_vecMergeVertexIndexs.push_back(std::pair<unsigned int, int>(pi, iBlock));
 				vh = (Vertex_handle)vh->next;
 			}
 
@@ -1341,19 +1476,40 @@ struct DMContainer
 			//saveIndex(0, info2);	//for debug
 			//saveIndex(0, info3);	//for debug
 
+			if ((abs(m_vecPoints[info1].x - 1236.929658) < 10e-4 && abs(m_vecPoints[info1].y - 4316.058791) < 10e-4)
+				|| (abs(m_vecPoints[info1].x - 1158.188142) < 10e-4 && abs(m_vecPoints[info1].y - 4268.846663) < 10e-4)
+				|| (abs(m_vecPoints[info1].x - 1167.637176) < 10e-4 && abs(m_vecPoints[info1].y - 4391.598187) < 10e-4))
+			{
+				int a = 0;
+			}
+
+			if ((abs(m_vecPoints[info2].x - 1236.929658) < 10e-4 && abs(m_vecPoints[info2].y - 4316.058791) < 10e-4)
+				|| (abs(m_vecPoints[info2].x - 1158.188142) < 10e-4 && abs(m_vecPoints[info2].y - 4268.846663) < 10e-4)
+				|| (abs(m_vecPoints[info2].x - 1167.637176) < 10e-4 && abs(m_vecPoints[info2].y - 4391.598187) < 10e-4))
+			{
+				int a = 0;
+			}
+
+			if ((abs(m_vecPoints[info3].x - 1236.929658) < 10e-4 && abs(m_vecPoints[info3].y - 4316.058791) < 10e-4)
+				|| (abs(m_vecPoints[info3].x - 1158.188142) < 10e-4 && abs(m_vecPoints[info3].y - 4268.846663) < 10e-4)
+				|| (abs(m_vecPoints[info3].x - 1167.637176) < 10e-4 && abs(m_vecPoints[info3].y - 4391.598187) < 10e-4))
+			{
+				int a = 0;
+			}
+
 			if (do_face_duplicate(info1, info2, info3)) {
-				saveIndex(0, info1);
-				saveIndex(0, info2);
-				saveIndex(0, info3);
+				saveMergeIndex(info1);
+				saveMergeIndex(info2);
+				saveMergeIndex(info3);
 				fh = (Face_handle)fh->next;
 				continue;
 			}
 
 			for (auto &seg : vecSegments) {
 				if (do_face_intersect(fh, seg)) {
-					saveIndex(0, info1);
-					saveIndex(0, info2);
-					saveIndex(0, info3);
+					saveMergeIndex(info1);
+					saveMergeIndex(info2);
+					saveMergeIndex(info3);
 					break;
 				}
 			}
@@ -1432,6 +1588,9 @@ struct DMContainer
 	std::vector<Polygon_2> m_polyHoles;
 	std::vector<std::vector<unsigned int>> m_vecvecIndexs;
 
+	std::vector<std::pair<unsigned int,  int>> m_vecMergeVertexIndexs;		//std::vector<std::pair<vertex_index,  block_index>>
+	std::vector<unsigned int> m_vecMergeTriIndexs;
+	
 	int m_iRows;
 	int m_iCols;
 
@@ -1446,6 +1605,7 @@ class Delaunay_Mutithread
 public:
 	typedef typename DMContainer::Point_2		Point_2;
 	typedef typename DMContainer::Polygon_2		Polygon_2;
+	typedef			 DMContainer::Block			Block;
 
 	Delaunay_Mutithread() {}
 
@@ -1491,6 +1651,10 @@ public:
 		{
 			for (auto &index : vecIndexs)
 				m_PrimiRef->push_back(index);
+
+
+
+
 		}
 
 		if (!m_vecPointsRef->empty())
@@ -1525,8 +1689,8 @@ public:
 			iMaxThread = 2;
 		}
 
-		//最合适数量: 如果少于300000，则只用单线程就好了，少数据量用多线程加速效果不一定明显
-		int iVertexPerThread = 300000;
+		//最合适数量: 如果少于1000000，则只用单线程就好了，少数据量用多线程加速效果不一定明显
+		int iVertexPerThread = 1000000;
 
 		//测试
 		//iVertexPerThread = 3;
@@ -1543,9 +1707,64 @@ public:
 
 	bool getBlockParam(int &iThread, int &iRows, int &iCols, unsigned int ib, unsigned int ie)
 	{
-		iRows = 1;		//for debug
-		iCols = 3;		//for debug
-		iThread = 3;	//for debug
+		if (iThread == 1) 
+		{
+			iRows = 1;
+			iCols = 1;
+			m_container.m_vecBlocks.resize(1);
+			m_container.m_vecBlocks[0].m_iCol = 0;
+			m_container.m_vecBlocks[0].m_iRow = 0;
+			m_container.m_vecBlocks[0].m_ib_raw = ib;
+			m_container.m_vecBlocks[0].m_ie_raw = ie;
+			m_container.m_vecBlocks[0].m_ib = ib;
+			m_container.m_vecBlocks[0].m_ie = ie;
+			m_container.m_vecBlocks[0].nei[0] = false;
+			m_container.m_vecBlocks[0].nei[1] = false;
+			m_container.m_vecBlocks[0].nei[2] = false;
+			m_container.m_vecBlocks[0].nei[3] = false;
+			m_container.m_vecBlocks[0].limits[0] = m_container.m_dMaxY;
+			m_container.m_vecBlocks[0].limits[1] = m_container.m_dMinY;
+			m_container.m_vecBlocks[0].limits[2] = m_container.m_dMinX;
+			m_container.m_vecBlocks[0].limits[3] = m_container.m_dMaxX;
+			m_container.m_vecvecIndexs.resize(1);
+			return true;
+		}
+
+		unsigned int size = ie - ib;
+		double xrange = m_container.m_dMaxX - m_container.m_dMinX;
+		double yrange = m_container.m_dMaxY - m_container.m_dMinY;
+		double xyratio = xrange / yrange;
+
+		if (xyratio < 0.2) 
+		{
+			iCols = 1;
+			iRows = iThread;
+		}
+		else if (xyratio > 5) 
+		{
+			iCols = iThread;
+			iRows = 1;
+		}
+		else 
+		{
+			int iRowNum = 1;
+			int iColNum = 1;
+			while (iRowNum *  iColNum < iThread)
+			{
+				if (xyratio > 1.0)
+				{
+					iColNum++;
+					iRowNum = iColNum / xyratio;
+				}
+				else
+				{
+					iRowNum++;
+					iColNum = iRowNum * xyratio;
+				}
+			}
+			iCols = iColNum;
+			iRows = iRowNum;
+		}
 
 		return m_container.partition(iRows, iCols, ib, ie);
 	}
@@ -1554,21 +1773,22 @@ public:
 	{
 		//memory enough ??
 
-		if (insert(vecPoints) <= 0)
-			return false;
-
-		int iThread = getThreadNum(m_container.m_vecPoints.size());
-
-		//测试
-		generate_random_outline(0.7, 0.7, 0.3, 0.3);
-
-		//多线程分区三角化
 		auto first_tri = [](DMContainer *pDMC, int iBlockIndex) {
 			if (pDMC) {
 				pDMC->delaunay(iBlockIndex);
 			}
 		};
 
+		if (insert(vecPoints) <= 0)
+			return false;
+
+		int iThread = getThreadNum(m_container.m_vecPoints.size());
+
+		//测试
+		iThread = 10;
+		//generate_random_outline(0.7, 0.7, 0.3, 0.3);
+
+		//生成分区
 		int iRows = 1;
 		int iCols = 1;
 		if (!getBlockParam(iThread, iRows, iCols, 0, m_container.m_vecPoints.size()))
@@ -1576,20 +1796,26 @@ public:
 			return false;
 		}
 
+		//多线程三角化
 		iThread = m_container.m_vecBlocks.size();
+		if (iThread == 1) 
+		{
+			first_tri(&m_container, 0);
+			return true;
+		}
 		std::vector<std::thread> vecThreads(iThread);
-		for (int iBlock = 0; iBlock < m_container.m_vecBlocks.size(); ++iBlock) {
+		for (int iBlock = 0; iBlock < m_container.m_vecBlocks.size(); ++iBlock)
+		{
 			vecThreads[iBlock] = std::move(std::thread(first_tri, &m_container, iBlock));
 		}
 		std::for_each(vecThreads.begin(), vecThreads.end(), std::mem_fn(&std::thread::join));
-
 		return m_container.merge();
 	}
 
 	//测试用
 	void generate_random_outline(double outline_ratio_x, double outline_ratio_y, double hole_ratio_x, double hole_ratio_y)
 	{
-		double center_x = (m_container.m_dMaxX - m_container.m_dMinX) / 2;
+		double center_x = (m_container.m_dMaxX - m_container.m_dMinX) / 2 - 1000.0;
 		double center_y = (m_container.m_dMaxY - m_container.m_dMinY) / 2;
 		double ouline_x_range = (m_container.m_dMaxX - m_container.m_dMinX) * outline_ratio_x;
 		double ouline_y_range = (m_container.m_dMaxY - m_container.m_dMinY) * outline_ratio_y;
@@ -1608,19 +1834,21 @@ public:
 
 		Polygon_2 poly_outline;
 		std::vector<Polygon_2> vecPolyOutlines;
-		poly_outline.m_vecPoints.push_back(Point_2(po_x1, po_y1));
-		poly_outline.m_vecPoints.push_back(Point_2(po_x1, po_y2));
-		poly_outline.m_vecPoints.push_back(Point_2(po_x2, po_y2));
 		poly_outline.m_vecPoints.push_back(Point_2(po_x2, po_y1));
+		poly_outline.m_vecPoints.push_back(Point_2(po_x2, po_y2));
+		poly_outline.m_vecPoints.push_back(Point_2(po_x1, po_y2));
+		poly_outline.m_vecPoints.push_back(Point_2(po_x1, po_y1));
+
 		vecPolyOutlines.push_back(poly_outline);
 		insert_outlines(vecPolyOutlines);
 
 		Polygon_2 poly_hole;
 		std::vector<Polygon_2> vecPolyHoles;
-		poly_hole.m_vecPoints.push_back(Point_2(ph_x1, ph_y1));
-		poly_hole.m_vecPoints.push_back(Point_2(ph_x1, ph_y2));
-		poly_hole.m_vecPoints.push_back(Point_2(ph_x2, ph_y2));
 		poly_hole.m_vecPoints.push_back(Point_2(ph_x2, ph_y1));
+		poly_hole.m_vecPoints.push_back(Point_2(ph_x2, ph_y2));
+		poly_hole.m_vecPoints.push_back(Point_2(ph_x1, ph_y2));
+		poly_hole.m_vecPoints.push_back(Point_2(ph_x1, ph_y1));
+
 		vecPolyHoles.push_back(poly_hole);
 		insert_holes(vecPolyHoles);
 	}
@@ -1646,3 +1874,4 @@ inline CDelaMerge<T, I>* CDelaMerge<T, I>::Create()
 	}
 	return ret;
 }
+

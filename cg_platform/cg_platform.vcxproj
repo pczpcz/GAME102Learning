@@ -119,14 +119,14 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\workspace\cg_platform\thirdParty\OpenSceneGraph\include;..\thirdParty\CGAL\include;..\thirdParty\CGAL;D:\workspace\cg_platform\cg_platform\USRefl\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\workspace\cg_platform\thirdParty\OpenSceneGraph\include;..\thirdParty\CGAL\include;..\thirdParty\CGAL;D:\workspace\cg_platform\cg_platform\USRefl\include;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh\Core;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh\Tools</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>osgViewerd.lib;osgGAd.lib;osgd.lib;OpenThreadsd.lib;..\..\thirdParty\CGAL\lib\*.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>D:\workspace\cg_platform\thirdParty\OpenSceneGraph\lib\debug;..\..\thirdParty\CGAL\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>osgViewerd.lib;osgGAd.lib;osgd.lib;OpenThreadsd.lib;..\..\thirdParty\CGAL\lib\*.lib;OpenMeshCored.lib;OpenMeshToolsd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>D:\workspace\cg_platform\thirdParty\OpenSceneGraph\lib\debug;..\..\thirdParty\CGAL\lib;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\lib</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -159,6 +159,7 @@
     <ClCompile Include="imgui\imgui_widgets.cpp" />
     <ClCompile Include="imgui\OsgImGuiHandler.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="2_MyView\MyView.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="0_ClockGeometry\ClockGeometry.h" />
@@ -176,6 +177,7 @@
     <ClInclude Include="imgui\imstb_textedit.h" />
     <ClInclude Include="imgui\imstb_truetype.h" />
     <ClInclude Include="imgui\OsgImGuiHandler.hpp" />
+    <ClInclude Include="2_MyView\MyView.h" />
     <ClInclude Include="USRefl\include\USRefl_99.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

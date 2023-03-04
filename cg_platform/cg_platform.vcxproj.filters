@@ -54,6 +54,9 @@
     <ClCompile Include="1_Delauney\ThreadPool.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="2_MyView\MyView.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="imgui\imconfig.h">
@@ -102,6 +105,9 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="USRefl\include\USRefl_99.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="2_MyView\MyView.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

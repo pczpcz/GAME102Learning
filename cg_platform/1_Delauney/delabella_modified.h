@@ -318,6 +318,9 @@ struct CDelaBella2 : IDelaBella2<T, I>
 	{
 		static const T resulterrbound;
 
+		//zhangchuanpan 2023.02.16
+		unsigned int m_info;
+
 		static bool overlap(const Vert *v1, const Vert *v2)
 		{
 			return v1->x == v2->x && v1->y == v2->y;

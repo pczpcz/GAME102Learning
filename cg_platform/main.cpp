@@ -26,6 +26,8 @@
 
 #include "USRefl_99.h"
 
+#include "2_MyView/MyView.h"
+
 class ImGuiInitOperation : public osg::Operation
 {
 public:
@@ -59,14 +61,14 @@ protected:
 
 int main(int argc, char** argv)
 {
-    osgViewer::Viewer viewer;
-    viewer.apply(new osgViewer::SingleWindow(100, 100, 640, 480));
-    viewer.setRealizeOperation(new ImGuiInitOperation);
-    viewer.addEventHandler(new ImGuiDemo);
+    //osgViewer::Viewer viewer;
+    //viewer.apply(new osgViewer::SingleWindow(100, 100, 640, 480));
+    //viewer.setRealizeOperation(new ImGuiInitOperation);
+    //viewer.addEventHandler(new ImGuiDemo);
 
-    Delaunay_Mutithread dm;
-    typedef Delaunay_Mutithread::Point_2 Point_2;
-    std::vector<Point_2> vecPoints;
+    //Delaunay_Mutithread dm;
+    //typedef Delaunay_Mutithread::Point_2 Point_2;
+    //std::vector<Point_2> vecPoints;
     //dm.readInputFromFile("D:\\inputs\\CapitalA.txt");
     //dm.readInputFromFile("D:\\inputs\\cdt.txt", vecPoints);
     //dmc.readInputFromFile("E:\\inputs\\cornercases.txt");
@@ -76,7 +78,7 @@ int main(int argc, char** argv)
     //dmc.readInputFromFile("E:\\inputs\\guitar_no_box.txt");
     //dmc.readInputFromFile("E:\\inputs\\Hanging.txt");
     //dmc.readInputFromFile("E:\\inputs\\Hanging2.txt");
-    dm.readInputFromFile("D:\\inputs\\island.txt", vecPoints);
+    //dm.readInputFromFile("D:\\inputs\\island.txt", vecPoints);
     //dm.readInputFromFile("D:\\inputs\\island.txt");
     //dmc.readInputFromFile("E:\\inputs\\issue-42-full-boundary-overlap.txt");
     //dmc.readInputFromFile("E:\\inputs\\issue-42-hole-overlaps-bondary.txt");
@@ -94,18 +96,19 @@ int main(int argc, char** argv)
     //dmc.readInputFromFile("E:\\inputs\\square-with-crack.txt");
     //dmc.readInputFromFile("E:\\inputs\\unit-square.txt");
 
-    osg::ref_ptr<osg::Group> root = new osg::Group;
-    osg::ref_ptr<osg::Geode> geode = new osg::Geode;
-    dm.delaunay(vecPoints);
-    osg::ref_ptr<osg::Geometry> geometry = dm.createGeometry();
-    geode->addDrawable(geometry.get());
-    root->addChild(geode.get());
-    viewer.setSceneData(root.get());
+    //osg::ref_ptr<osg::Group> root = new osg::Group;
+    //osg::ref_ptr<osg::Geode> geode = new osg::Geode;
+    //dm.delaunay(vecPoints);
+    //osg::ref_ptr<osg::Geometry> geometry = dm.createGeometry();
+    //geode->addDrawable(geometry.get());
+    //root->addChild(geode.get());
+    //viewer.setSceneData(root.get());
 
-    viewer.setCameraManipulator(new osgGA::TrackballManipulator);
-    viewer.setThreadingModel(osgViewer::Viewer::SingleThreaded);
-    viewer.addEventHandler(new osgGA::StateSetManipulator(viewer.getCamera()->getOrCreateStateSet()));	//显示网格
-    viewer.addEventHandler(new osgViewer::StatsHandler);
+    //viewer.setCameraManipulator(new osgGA::TrackballManipulator);
+    //viewer.setThreadingModel(osgViewer::Viewer::SingleThreaded);
+    //viewer.addEventHandler(new osgGA::StateSetManipulator(viewer.getCamera()->getOrCreateStateSet()));	//显示网格
+    //viewer.addEventHandler(new osgViewer::StatsHandler);
 
-    return viewer.run();
+    MyView view;
+    return view.run();
 }
