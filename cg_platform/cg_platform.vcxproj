@@ -119,7 +119,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\workspace\cg_platform\thirdParty\OpenSceneGraph\include;..\thirdParty\CGAL\include;..\thirdParty\CGAL;D:\workspace\cg_platform\cg_platform\USRefl\include;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh\Core;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh\Tools</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\workspace\cg_platform\thirdParty\OpenSceneGraph\include;..\thirdParty\CGAL\include;..\thirdParty\CGAL;D:\workspace\cg_platform\cg_platform\USRefl\include;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh\Core;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh\Tools;C:\Users\10993\Desktop\cg_platform\cg_platform\OvMaths\include;C:\Users\10993\Desktop\cg_platform\cg_platform\OvTools\include;C:\Users\10993\Desktop\cg_platform\cg_platform\OvUI\include;C:\Users\10993\Desktop\cg_platform\cg_platform\imgui</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
@@ -155,7 +155,6 @@
     <ClCompile Include="imgui\imgui_demo.cpp" />
     <ClCompile Include="imgui\imgui_draw.cpp" />
     <ClCompile Include="imgui\imgui_impl_opengl3.cpp" />
-    <ClCompile Include="imgui\imgui_tables.cpp" />
     <ClCompile Include="imgui\imgui_widgets.cpp" />
     <ClCompile Include="imgui\OsgImGuiHandler.cpp" />
     <ClCompile Include="main.cpp" />

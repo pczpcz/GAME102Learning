@@ -17,6 +17,8 @@
 #include <OpenMesh/Core/Mesh/TriMesh_ArrayKernelT.hh>
 typedef OpenMesh::TriMesh_ArrayKernelT<>  MyMesh;
 
+#include "OvUI/Panels/PanelWindow.h"
+
 class MyView
 {
 public:
