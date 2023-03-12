@@ -10,9 +10,9 @@ void OvUI::Modules::Canvas::Draw()
 {
 	if (!m_panels.empty())
 	{
-		ImGui_ImplOpenGL3_NewFrame();
+		//ImGui_ImplOpenGL3_NewFrame();
 		//ImGui_ImplGlfw_NewFrame();
-		ImGui::NewFrame();
+		//ImGui::NewFrame();
 
 		if (m_isDockspace)
 		{
@@ -38,7 +38,7 @@ void OvUI::Modules::Canvas::Draw()
 		for (auto& panel : m_panels)
 			panel.get().Draw();
 
-		ImGui::Render();
+		//ImGui::Render();
 	}
 }
 

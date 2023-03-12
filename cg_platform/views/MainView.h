@@ -5,6 +5,12 @@
 #include "OsgView.h"
 #include "imgui_impl_opengl3.h"
 
+#include "OvUI/Modules/Canvas.h"
+#include "OvUI/Panels/PanelMenuBar.h"
+
+#include "PanelsManager.h"
+#include "MenuBar.h"
+
 class ImGuiInitOperation : public osg::Operation
 {
 public:
@@ -30,23 +36,35 @@ public:
 class MainView : public OsgView
 {
 public:
-    MainView(const std::string &name)  : OsgView(name)
+    MainView(const std::string &name)  : OsgView(name), m_panelsManager(m_canvas)
     {
-        
+        setup_ui();
     }
 
     ~MainView() 
     {
     }
 
+    void setup_ui() 
+    {
+        //创建菜单栏
+        m_panelsManager.CreatePanel<OvEditor::Panels::MenuBar>("Menu Bar");
+
+        //创建属性窗口
+
+        m_canvas.MakeDockspace(true);
+    }
+
 	void render_imgui() override 
     {
-        ImGui::ShowDemoWindow();
+        //ImGui::ShowDemoWindow();
+        m_canvas.Draw();
     }
 
 	void render_osg() override {}
 
 private:
-
+    OvUI::Modules::Canvas m_canvas;
+    OvEditor::Core::PanelsManager m_panelsManager;
 };
 
