@@ -119,14 +119,15 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\workspace\cg_platform\thirdParty\OpenSceneGraph\include;..\thirdParty\CGAL\include;..\thirdParty\CGAL;D:\workspace\cg_platform\cg_platform\USRefl\include;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh\Core;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\include\OpenMesh\Tools;C:\Users\10993\Desktop\cg_platform\cg_platform\OvMaths\include;C:\Users\10993\Desktop\cg_platform\cg_platform\OvTools\include;C:\Users\10993\Desktop\cg_platform\cg_platform\OvUI\include;C:\Users\10993\Desktop\cg_platform\cg_platform\imgui</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\thirdParty\OpenSceneGraph\include;..\thirdParty\CGAL\include;..\thirdParty\CGAL;utils\USRefl\include;..\thirdParty\openmesh\openmesh\include;..\thirdParty\openmesh\openmesh\include\OpenMesh;..\thirdParty\openmesh\openmesh\include\OpenMesh\Core;..\thirdParty\openmesh\openmesh\include\OpenMesh\Tools;imgui\OvMaths\include;imgui\OvTools\include;imgui\OvUI\include;imgui;..\thirdParty\glew\include;utils\USRefl</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <CallingConvention>StdCall</CallingConvention>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>osgViewerd.lib;osgGAd.lib;osgd.lib;OpenThreadsd.lib;..\..\thirdParty\CGAL\lib\*.lib;OpenMeshCored.lib;OpenMeshToolsd.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>D:\workspace\cg_platform\thirdParty\OpenSceneGraph\lib\debug;..\..\thirdParty\CGAL\lib;D:\workspace\cg_platform\thirdParty\openmesh\openmesh\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>osgViewerd.lib;osgGAd.lib;osgd.lib;osgDBd.lib;OpenThreadsd.lib;..\..\thirdParty\CGAL\lib\*.lib;OpenMeshCored.lib;OpenMeshToolsd.lib;glew32sd.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\thirdParty\OpenSceneGraph\lib\debug;..\thirdParty\CGAL\lib;..\thirdParty\openmesh\openmesh\lib;..\thirdParty\glew\lib</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -146,11 +147,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="0_ClockGeometry\ClockGeometry.cpp" />
-    <ClCompile Include="1_Delauney\delabella.cpp" />
-    <ClCompile Include="1_Delauney\delabella_modified.cpp" />
-    <ClCompile Include="1_Delauney\Delaunay_Mutithread.cpp" />
-    <ClCompile Include="1_Delauney\ThreadPool.cpp" />
+    <ClCompile Include="algorithm\Triangulation\Delauney\delabella.cpp" />
+    <ClCompile Include="algorithm\Triangulation\Delauney\delabella_modified.cpp" />
+    <ClCompile Include="algorithm\Triangulation\Delauney\Delaunay_Mutithread.cpp" />
+    <ClCompile Include="algorithm\Triangulation\Delauney\ThreadPool.cpp" />
+    <ClCompile Include="assets\AssetManager.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
     <ClCompile Include="imgui\imgui_demo.cpp" />
     <ClCompile Include="imgui\imgui_draw.cpp" />
@@ -158,26 +159,36 @@
     <ClCompile Include="imgui\imgui_widgets.cpp" />
     <ClCompile Include="imgui\OsgImGuiHandler.cpp" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="2_MyView\MyView.cpp" />
+    <ClCompile Include="tests\ClockGeometry\ClockGeometry.cpp" />
+    <ClCompile Include="views\MainView.cpp" />
+    <ClCompile Include="views\MyView.cpp" />
+    <ClCompile Include="views\OsgView.cpp" />
+    <ClCompile Include="views\SceneView.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="0_ClockGeometry\ClockGeometry.h" />
-    <ClInclude Include="1_Delauney\delabella.h" />
-    <ClInclude Include="1_Delauney\delabella_modified.h" />
-    <ClInclude Include="1_Delauney\Delaunay_Mutithread.h" />
-    <ClInclude Include="1_Delauney\predicates.h" />
-    <ClInclude Include="1_Delauney\ThreadPool.h" />
+    <ClInclude Include="algorithm\Triangulation\Delauney\delabella.h" />
+    <ClInclude Include="algorithm\Triangulation\Delauney\delabella_modified.h" />
+    <ClInclude Include="algorithm\Triangulation\Delauney\Delaunay_Mutithread.h" />
+    <ClInclude Include="algorithm\Triangulation\Delauney\predicates.h" />
+    <ClInclude Include="algorithm\Triangulation\Delauney\ThreadPool.h" />
+    <ClInclude Include="assets\AssetManager.h" />
     <ClInclude Include="imgui\imconfig.h" />
     <ClInclude Include="imgui\imgui.h" />
     <ClInclude Include="imgui\imgui_impl_opengl3.h" />
-    <ClInclude Include="imgui\imgui_impl_opengl3_loader.h" />
     <ClInclude Include="imgui\imgui_internal.h" />
     <ClInclude Include="imgui\imstb_rectpack.h" />
     <ClInclude Include="imgui\imstb_textedit.h" />
     <ClInclude Include="imgui\imstb_truetype.h" />
     <ClInclude Include="imgui\OsgImGuiHandler.hpp" />
-    <ClInclude Include="2_MyView\MyView.h" />
-    <ClInclude Include="USRefl\include\USRefl_99.h" />
+    <ClInclude Include="tests\ClockGeometry\ClockGeometry.h" />
+    <ClInclude Include="views\MainView.h" />
+    <ClInclude Include="views\MyView.h" />
+    <ClInclude Include="views\OsgView.h" />
+    <ClInclude Include="views\SceneView.h" />
+    <ClInclude Include="views\ViewBase.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="imgui.ini" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

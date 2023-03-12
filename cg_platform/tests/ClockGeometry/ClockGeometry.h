@@ -1,6 +1,7 @@
 #pragma once
 
 #include <osg/Geometry>
+#include <atltime.h>
 
 class TimeUpdataCallback : public osg::Drawable::UpdateCallback 
 {

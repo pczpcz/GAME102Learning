@@ -44,11 +44,11 @@ private:
 OsgImGuiHandler::OsgImGuiHandler()
     : time_(0.0f), mousePressed_{false}, mouseWheel_(0.0f), initialized_(false)
 {
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    (void)io;
-    init();
+    //IMGUI_CHECKVERSION();
+    //ImGui::CreateContext();
+    //ImGuiIO& io = ImGui::GetIO();
+    //(void)io;
+    //init();
 }
 
 /**
