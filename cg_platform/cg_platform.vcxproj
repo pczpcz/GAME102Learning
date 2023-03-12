@@ -229,7 +229,9 @@
     <ClCompile Include="imgui\OvUI\src\OvUI\Widgets\Visual\ProgressBar.cpp" />
     <ClCompile Include="imgui\OvUI\src\OvUI\Widgets\Visual\Separator.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="views\MainUIManager.cpp" />
     <ClCompile Include="tests\ClockGeometry\ClockGeometry.cpp" />
+    <ClCompile Include="views\Console.cpp" />
     <ClCompile Include="views\MainView.cpp" />
     <ClCompile Include="views\MenuBar.cpp" />
     <ClCompile Include="views\MyView.cpp" />
@@ -354,7 +356,9 @@
     <ClInclude Include="imgui\OvUI\include\OvUI\Widgets\Visual\Image.h" />
     <ClInclude Include="imgui\OvUI\include\OvUI\Widgets\Visual\ProgressBar.h" />
     <ClInclude Include="imgui\OvUI\include\OvUI\Widgets\Visual\Separator.h" />
+    <ClInclude Include="views\MainUIManager.h" />
     <ClInclude Include="tests\ClockGeometry\ClockGeometry.h" />
+    <ClInclude Include="views\Console.h" />
     <ClInclude Include="views\MainView.h" />
     <ClInclude Include="views\MenuBar.h" />
     <ClInclude Include="views\MyView.h" />

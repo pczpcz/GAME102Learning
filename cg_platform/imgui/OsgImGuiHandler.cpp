@@ -196,7 +196,8 @@ bool OsgImGuiHandler::handle(const osgGA::GUIEventAdapter& ea, osgGA::GUIActionA
             {
                 io.AddInputCharacter((unsigned short)c);
             }
-            return wantCaptureKeyboard;
+            //return wantCaptureKeyboard;
+            return osgGA::GUIEventHandler::handle(ea, aa);
         }
         case (osgGA::GUIEventAdapter::RELEASE):
         case (osgGA::GUIEventAdapter::PUSH):
@@ -205,18 +206,21 @@ bool OsgImGuiHandler::handle(const osgGA::GUIEventAdapter& ea, osgGA::GUIActionA
             mousePressed_[0] = ea.getButtonMask() & osgGA::GUIEventAdapter::LEFT_MOUSE_BUTTON;
             mousePressed_[1] = ea.getButtonMask() & osgGA::GUIEventAdapter::RIGHT_MOUSE_BUTTON;
             mousePressed_[2] = ea.getButtonMask() & osgGA::GUIEventAdapter::MIDDLE_MOUSE_BUTTON;
-            return wantCaptureMouse;
+            //return wantCaptureMouse;
+            return osgGA::GUIEventHandler::handle(ea, aa);
         }
         case (osgGA::GUIEventAdapter::DRAG):
         case (osgGA::GUIEventAdapter::MOVE):
         {
             io.MousePos = ImVec2(ea.getX(), io.DisplaySize.y - ea.getY());
-            return wantCaptureMouse;
+            //return wantCaptureMouse;
+            return osgGA::GUIEventHandler::handle(ea, aa);
         }
         case (osgGA::GUIEventAdapter::SCROLL):
         {
             mouseWheel_ = ea.getScrollingMotion() == osgGA::GUIEventAdapter::SCROLL_UP ? 1.0 : -1.0;
-            return wantCaptureMouse;
+            //return wantCaptureMouse;
+            return osgGA::GUIEventHandler::handle(ea, aa);
         }
         default:
         {
