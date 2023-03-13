@@ -8,7 +8,9 @@ public:
 	SceneView(const std::string &name) : ViewBase(name) {}
 	virtual ~SceneView() {}
 
-	void render_imgui() override {}
-	void render_osg() override {}
+	//重点：对于imgui内部包含osg窗口的窗口，要把imgui的窗口事件传递给osg窗口，如imgui窗口被关闭了，那通过imgui窗口的回调，osg窗口也应该被关闭（停止view的渲染）
+
+private:
+
 };
 

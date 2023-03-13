@@ -13,8 +13,23 @@ public:
     {
     }
 
-	virtual void render_imgui() = 0;
-	virtual void render_osg() = 0;
+    virtual void create_imgui() {}
+
+    virtual void size(int& x, int &y, int &width, int &height) 
+    {
+        x = 0;
+        y = 0;
+        width = 1000;
+        height = 1000;
+    }
+
+    virtual void setCamera(osg::ref_ptr<osg::Camera>) {}
+
+    std::string& get_name() { return m_strName; }
+
+    virtual void addEventHandler(osgViewer::View* view) {}
+
+    virtual void setSceneData(osg::Group* root) {}
 
 protected:
 	std::string m_strName;

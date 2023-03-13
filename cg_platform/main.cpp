@@ -1,33 +1,19 @@
 #include <iostream>
 
 #include <osgViewer/Viewer>
-#include <osgViewer/config/SingleWindow>
-#include <osgGA/StateSetManipulator>
-#include <osgGA/TrackballManipulator>
-#include <osg/GraphicsContext>
-#include <osgDB/Registry>
-#include <osgDB/ReadFile>
-
 #include <osg/Geometry>
 #include <vector>
 #include <unordered_map>
-#include <deque>
-#include <iterator>
-#include <algorithm>
 
-#include <CGAL/Segment_2.h>
-#include <CGAL/Circle_2.h>
-#include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
-
-#undef max
-#undef min
-#include "algorithm/Triangulation/Delauney/Delaunay_Mutithread.h"
+//#undef max
+//#undef min
 //#include "utils/USRefl/include/USRefl_99.h"
-
-#include "views/MainView.h"
 
 #include "tests/ClockGeometry/ClockGeometry.h"
 
+#include "views/MainView.h"
+#include "views/SceneView.h"
+#include "views/MainUIManager.h"
 
 int main(int argc, char** argv)
 {
@@ -44,8 +30,13 @@ int main(int argc, char** argv)
     //窗口初始化逻辑
     //考虑：内部osg窗口，要不要和主osg窗口共享同一个帧循环
     //1. 主窗口：（osg包含imgui的界面）--MainView
-    osg::ref_ptr<MainView> mainview = new MainView("MainView");
-    UIManager::instance().create_osgview(Context::instance().get_main_gc(), mainview);
+    UIManager::instance();
+    //注册界面
+    UIManager::instance().register_view(new MainView("Main View"));
+    //register_view(new SceneView("Scene View"));
+    //
+    //
+
 
     //2. 加载资源--仅仅测试用，后面计划由asset模块进行导入，并考虑加载效率，分页LOD。。。？？？
     osg::ref_ptr<osg::Group> root = new osg::Group;
@@ -54,8 +45,7 @@ int main(int argc, char** argv)
     geo->createGeometry();
     geode->addChild(geo.get());
     root->addChild(geode.get());
-    int id;
-    osgViewer::View* view = UIManager::instance().get_view(mainview->get_name(), id);
+    osgViewer::View* view = UIManager::instance().get_view("Main View");
     if (!view) return 0;
     view->setSceneData(root.get());
 

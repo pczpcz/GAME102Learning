@@ -3,75 +3,16 @@
 #include <osg/GraphicsContext>
 #include <osgViewer/View>
 #include <osgViewer/CompositeViewer>
+#include <osgGA/TrackballManipulator>
 
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
-#include "OsgImGuiHandler.hpp"
-
-#include "OsgView.h"
-#include "SceneView.h"
 
 #include "OvUI/Modules/Canvas.h"
 #include "OvUI/Panels/PanelMenuBar.h"
-
 #include "PanelsManager.h"
-#include "MenuBar.h"
-#include "Console.h"
 
-class Context
-{
-public:
-    static Context& instance()
-    {
-        static Context context;
-        return context;
-    }
-
-    ~Context()
-    {
-        int a = 0;
-    }
-
-    osg::ref_ptr<osg::GraphicsContext> get_main_gc()
-    {
-        if (!m_maingc)
-        {
-            osg::GraphicsContext::WindowingSystemInterface* wsi = osg::GraphicsContext::getWindowingSystemInterface();
-            if (!wsi)
-            {
-                return nullptr;
-            }
-
-            unsigned int width, height;
-            osg::GraphicsContext::ScreenIdentifier main_screen_id;
-
-            main_screen_id.readDISPLAY();
-            main_screen_id.setUndefinedScreenDetailsToDefaultScreen();
-            wsi->getScreenResolution(main_screen_id, width, height);
-
-            osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
-            traits->x = 100;
-            traits->y = 100;
-            traits->width = width - 100;
-            traits->height = height - 100;
-            traits->windowDecoration = true;
-            traits->doubleBuffer = true;
-            traits->sharedContext = 0;
-            traits->readDISPLAY();
-            traits->setUndefinedScreenDetailsToDefaultScreen();
-
-            m_maingc = osg::GraphicsContext::createGraphicsContext(traits.get());
-        }
-        return m_maingc;
-    }
-
-private:
-    Context() {}
-    Context& operator=(const Context&) = delete;
-
-private:
-    osg::ref_ptr<osg::GraphicsContext> m_maingc;
-};
+#include "ViewBase.h"
 
 class UIManager
 {
@@ -109,68 +50,82 @@ public:
     {
     }
 
-    int create_osgview(osg::GraphicsContext* gc, osg::ref_ptr<OsgView>imguiview)
+    int run() { return m_mainViewer.run(); }
+
+    void setup_ui()
     {
-        if (nullptr == gc || nullptr == imguiview)
-            return -1;
+        //创建imgui控件
+        for (int i = 0; i < m_vecViews.size(); ++i) 
+            m_vecViews.at(i)->create_imgui();
 
-        int tid;
-        osgViewer::View* view = get_view(imguiview->get_name(), tid);
-        if (view) return -1;
+        //创建scene view -- imgui部分
+        m_canvas.MakeDockspace(true);
+    }
 
-        // id++;
-        view = new osgViewer::View;   //会不会泄漏？？
-        view->setName(imguiview->get_name());
-        m_mainViewer.addView(view);
-        m_mapViews.insert(std::pair<std::string, int>(imguiview->get_name(), 0));
+    void draw()
+    {
+        ImGui::ShowDemoWindow();
+        m_canvas.Draw();
+    }
 
-        view->getCamera()->setGraphicsContext(gc);
-        const osg::GraphicsContext::Traits* traits = gc->getTraits();
+    osgViewer::View* get_view(const std::string& name)
+    {
+        auto ittr = m_mapViews.find(name);
+        if (ittr != m_mapViews.end())
+        {
+            int id = ittr->second;
+            return m_mainViewer.getView(id);
+        }
+        return nullptr;
+    }
+
+    void register_view(ViewBase* imguiview)
+    {
+        if (!imguiview) return;
+        int x, y, width, height;
+        imguiview->size(x, y, width, height);
+
+        osgViewer::View* view = get_view(imguiview->get_name());
+        if (view) return;
+
+        osg::GraphicsContext::WindowingSystemInterface* wsi = osg::GraphicsContext::getWindowingSystemInterface();
+        if (!wsi) return;
+
+        //unsigned int width, height;
+        //osg::GraphicsContext::ScreenIdentifier main_screen_id;
+        //main_screen_id.readDISPLAY();
+        //main_screen_id.setUndefinedScreenDetailsToDefaultScreen();
+        //wsi->getScreenResolution(main_screen_id, width, height);
+
+        osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
+        traits->x = x;
+        traits->y = y;
+        traits->width = width;
+        traits->height = height;
+        traits->windowDecoration;
+        traits->doubleBuffer = true;
+        traits->sharedContext = 0;
+        traits->readDISPLAY();
+        traits->setUndefinedScreenDetailsToDefaultScreen();
         if (traits)
         {
+            osg::ref_ptr<osg::GraphicsContext> gc = osg::GraphicsContext::createGraphicsContext(traits.get());
+            osgViewer::View* view = new osgViewer::View;
+            view->setName(imguiview->get_name());
+            m_mainViewer.addView(view);
+
+            view->getCamera()->setGraphicsContext(gc);
             view->getCamera()->setProjectionMatrixAsPerspective(30.0, double(traits->width) / double(traits->height), 1.0, 1000.0);
             view->getCamera()->setViewport(new osg::Viewport(0, 0, traits->width, traits->height));
             view->getCamera()->setGraphicsContext(gc);
             view->setCameraManipulator(new osgGA::TrackballManipulator);
 
             //嵌合imgui
-            view->addEventHandler(imguiview);
+            imguiview->addEventHandler(view);
+            imguiview->setCamera(view->getCamera());
+            m_mapViews.insert(std::pair<std::string, int>(imguiview->get_name(), 0));
+            m_vecViews.push_back(imguiview);
         }
-    }
-
-    osgViewer::View* get_view(const std::string& name, int& id)
-    {
-        auto ittr = m_mapViews.find(name);
-        if (ittr != m_mapViews.end())
-        {
-            id = ittr->second;
-            return m_mainViewer.getView(id);
-        }
-        return nullptr;
-    }
-
-    int run() { return m_mainViewer.run(); }
-
-    void setup_ui()
-    {
-        OvUI::Settings::PanelWindowSettings settings;
-        settings.closable = true;
-        settings.collapsable = true;
-        settings.dockable = true;
-
-        //创建菜单栏
-        m_panelsManager.CreatePanel<OvEditor::Panels::MenuBar>("Menu Bar");
-
-        //创建属性窗口
-        m_panelsManager.CreatePanel<OvEditor::Panels::Console>("Console", true, settings);
-
-        m_canvas.MakeDockspace(true);
-    }
-
-    void render_imgui()
-    {
-        ImGui::ShowDemoWindow();
-        m_canvas.Draw();
     }
 
 private:
@@ -178,7 +133,7 @@ private:
     {
         init_imgui();
         m_mainViewer.setRealizeOperation(new ImGuiInitOperation);
-    }
+     }
 
     UIManager& operator=(const UIManager&) = delete;
 
@@ -210,12 +165,15 @@ private:
         io.KeyMap[ImGuiKey_Z] = osgGA::GUIEventAdapter::KeySymbol::KEY_Z;
     }
 
-private:
-    osgViewer::CompositeViewer m_mainViewer;
-    std::unordered_map<std::string, int> m_mapViews;
-    OvUI::Modules::Canvas m_canvas;
+public:
     OvEditor::Core::PanelsManager m_panelsManager;
+private:
+    //imgui
+    OvUI::Modules::Canvas m_canvas;
 
-    //static int id;
+    //osg
+    std::unordered_map<std::string, int> m_mapViews;
+    osgViewer::CompositeViewer m_mainViewer;
+    std::vector<ViewBase*> m_vecViews;
 };
 
